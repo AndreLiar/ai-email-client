@@ -84,19 +84,11 @@ npm run dev
 
 ---
 
-## 🧪 Tests conseillés
 
-- 🔁 Connexion Gmail (OAuth)
-- ✨ Génération IA d'une réponse
-- 📤 Envoi de l’email
-- 📚 Consultation historique
-- 🗂️ Catégorisation d’une réponse
-- 🚀 Passage Premium via Stripe
 
 
 ## 📸 Aperçu
-
-*(ajoute une capture ici si tu veux illustrer ton app)*
+![hero-dashboard](https://github.com/user-attachments/assets/00b56534-8da9-49de-947c-972b7eaf3b1b)
 
 ---
 
