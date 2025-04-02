@@ -90,8 +90,8 @@ npm run dev
 <img width="1470" alt="Screenshot 2025-04-02 at 11 56 10" src="https://github.com/user-attachments/assets/eb09efa0-7c04-45b9-a08d-7571ecdb8c7f" />
 <img width="1470" alt="Screenshot 2025-04-02 at 11 56 26" src="https://github.com/user-attachments/assets/67d0e6c3-06aa-45b9-afb3-3398e4ccd3cf" />
 <img width="1470" alt="Screenshot 2025-04-02 at 12 00 04" src="https://github.com/user-attachments/assets/f22fd212-49ea-463e-aef8-ed320955b417" />
-<img width="1470" alt="Screenshot 2025-04-02 at 12 00 36" src="https://github.com/user-attachments/assets/3596c668-d53d-473e-833a-a462b6f3a5c8" />
 <img width="1470" alt="Screenshot 2025-04-02 at 12 00 53" src="https://github.com/user-attachments/assets/e9527ae7-ee21-4cdf-a3c7-a340093d7988" />
+<img width="1470" alt="Screenshot 2025-04-02 at 12 00 36" src="https://github.com/user-attachments/assets/0de4084a-e4b2-4d88-9ca8-a7116d597278" />
 
 
 
