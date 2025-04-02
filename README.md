@@ -1,11 +1,10 @@
----
 
 ```md
 # 📧 AI Email Client – Répondeur intelligent pour Gmail
 
 Une application web moderne qui connecte ton compte Gmail, lit tes emails, et génère des réponses automatiques intelligentes grâce à l'IA Gemini.
 
----
+
 
 ## 🚀 Problème Résolu
 
