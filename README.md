@@ -1,5 +1,3 @@
-Parfait, je vais te proposer un nouveau README **clair, moderne et professionnel**, basé uniquement sur ce que **ton code implémente réellement** — sans fausses affirmations. Voici une nouvelle version :
-
 ---
 
 ```md
