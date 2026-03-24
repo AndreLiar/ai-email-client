@@ -63,7 +63,8 @@ export default function CleanerPage() {
   const [page, setPage] = useState(0);
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
   const scanTermRef = useRef<HTMLDivElement>(null);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/auth/status')
@@ -109,9 +110,19 @@ export default function CleanerPage() {
 
   const isLoading = status === 'submitted' || status === 'streaming';
 
+  // Scroll chat body internally (not the page) when messages update
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    }
   }, [messages]);
+
+  // When agent finishes, focus the input so user can type immediately
+  useEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      chatInputRef.current?.focus();
+    }
+  }, [isLoading]);
 
   // Auto-scroll scan terminal
   useEffect(() => {
@@ -1235,7 +1246,7 @@ export default function CleanerPage() {
             <span className="cl-chat-bar-title">agent — gemini-1.5-flash · vercel ai sdk v6</span>
             <div style={{ width: 46 }} />
           </div>
-          <div className="cl-chat-body">
+          <div className="cl-chat-body" ref={chatBodyRef}>
             {messages.length === 0 && (
               <div className="cl-chat-empty">
                 <span style={{ fontSize: '1.5rem', filter: 'drop-shadow(0 0 10px rgba(0,217,126,0.3))' }}>◈</span>
@@ -1311,7 +1322,6 @@ export default function CleanerPage() {
                 <span>AGENT IS WORKING</span>
               </div>
             )}
-            <div ref={chatBottomRef} />
           </div>
           <div className="cl-chat-footer">
             <form
@@ -1324,6 +1334,7 @@ export default function CleanerPage() {
               }}
             >
               <input
+                ref={chatInputRef}
                 className="cl-chat-input"
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
