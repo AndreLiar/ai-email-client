@@ -14,12 +14,22 @@ type SenderRow = {
   sampleMessageId: string;
   canAutoUnsubscribe: boolean;
   category?: string;
+  oldestDate: number;
+  newestDate: number;
 };
 
 type ScanResult = {
   senders: SenderRow[];
-  totalScanned: number;
+  total: number;
 };
+
+function monthsAgo(ts: number): number {
+  return Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24 * 30));
+}
+
+function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
 
 type SenderStatus = 'idle' | 'deleting' | 'unsubscribing' | 'done' | 'error';
 
@@ -70,7 +80,7 @@ export default function CleanerPage() {
       const res = await fetch('/api/agent/scan-senders');
       const data = await res.json();
       setScanResult(data);
-      log(`Scanned ${data.totalScanned} emails — ${data.senders.length} unique senders found.`);
+      log(`Scanned ${data.total} unread emails older than 6 months — ${data.senders.length} repetitive senders found.`);
     } catch {
       log('Error scanning inbox.');
     } finally {
@@ -803,7 +813,7 @@ export default function CleanerPage() {
         <div>
           <p className="cl-page-tag">// inbox_cleaner</p>
           <h1 className="cl-page-title">Inbox Cleaner</h1>
-          <p className="cl-page-sub">scan → classify → unsubscribe → trash</p>
+          <p className="cl-page-sub">scanning unread emails older than 6 months · repetitive senders only</p>
         </div>
         <div className="cl-header-actions">
           <button
@@ -926,8 +936,8 @@ export default function CleanerPage() {
         <>
           <div className="cl-scan-bar">
             <span className="cl-scan-meta">
-              <strong>{scanResult.senders.length}</strong> senders across{' '}
-              <strong>{scanResult.totalScanned}</strong> emails
+              <strong>{scanResult.senders.length}</strong> repetitive senders in{' '}
+              <strong>{scanResult.total}</strong> unread emails older than 6 months
               {doneCount > 0 && <span className="cl-done">✓ {doneCount} cleaned</span>}
             </span>
             <div className="cl-bulk-actions">
@@ -961,10 +971,11 @@ export default function CleanerPage() {
                     />
                   </th>
                   <th>Sender</th>
-                  <th style={{ width: 80 }}>Emails</th>
+                  <th style={{ width: 80 }}>Unread</th>
+                  <th style={{ width: 110 }}>Oldest</th>
                   <th style={{ width: 130 }}>Category</th>
                   <th style={{ width: 90 }}>Unsub</th>
-                  <th style={{ width: 120 }}>Status</th>
+                  <th style={{ width: 110 }}>Status</th>
                   <th style={{ width: 120 }}>Actions</th>
                 </tr>
               </thead>
@@ -991,6 +1002,29 @@ export default function CleanerPage() {
                       </td>
                       <td>
                         <span className="cl-count-badge">{sender.count}</span>
+                      </td>
+                      <td>
+                        {sender.oldestDate ? (
+                          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{
+                              fontFamily: 'var(--font-space-mono)',
+                              fontSize: '0.62rem',
+                              color: monthsAgo(sender.oldestDate) >= 12 ? '#ff5f57' : '#ffbd2e',
+                              letterSpacing: '0.04em',
+                            }}>
+                              {monthsAgo(sender.oldestDate)}mo ago
+                            </span>
+                            <span style={{
+                              fontFamily: 'var(--font-space-mono)',
+                              fontSize: '0.58rem',
+                              color: '#2a4a34',
+                            }}>
+                              {formatDate(sender.oldestDate)}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="cl-status-idle">—</span>
+                        )}
                       </td>
                       <td>
                         {catStyle ? (
@@ -1066,15 +1100,15 @@ export default function CleanerPage() {
       {/* ── Empty state ── */}
       {!scanResult && !scanning && (
         <div className="cl-empty">
-          <div className="cl-empty-icon">🧹</div>
-          <div className="cl-empty-title">Ready to clean</div>
+          <div className="cl-empty-icon">🗂️</div>
+          <div className="cl-empty-title">Ready to scan</div>
           <p className="cl-empty-sub">
-            Hit <strong style={{ color: '#00d97e' }}>SCAN INBOX</strong> to find every
-            newsletter, promo, and job alert sender grouped by volume.
+            Hit <strong style={{ color: '#00d97e' }}>SCAN INBOX</strong> to find every sender
+            with unread emails sitting in your mailbox for more than 6 months.
           </p>
           <p className="cl-empty-hint">
-            Or open the <em>AI Agent</em> and say<br />
-            <em>&quot;scan my inbox and delete all job alerts&quot;</em>
+            Only <em>repetitive senders</em> (2+ emails) are shown —<br />
+            newsletters, job alerts, and promos you never opened.
           </p>
         </div>
       )}
