@@ -3,7 +3,9 @@
 import { getValidAccessToken } from '@/lib/getValidAccessToken';
 import { formatEmailAsMime } from '@/lib/formatEmailAsMime';
 import { streamText, generateText, tool, convertToModelMessages, stepCountIs } from 'ai';
-import { google } from '@ai-sdk/google';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+
+const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
 import { createGroq } from '@ai-sdk/groq';
 import { z } from 'zod';
 
