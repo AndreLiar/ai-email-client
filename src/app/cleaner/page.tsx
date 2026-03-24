@@ -110,17 +110,18 @@ export default function CleanerPage() {
 
   const isLoading = status === 'submitted' || status === 'streaming';
 
-  // Scroll chat body internally (not the page) when messages update
+  // Scroll chat body internally only when the number of messages changes
+  // (not on every render / streaming chunk — avoids page scroll side-effects)
   useEffect(() => {
     if (chatBodyRef.current) {
       chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages.length]);
 
-  // When streaming finishes, focus the input after a short delay
+  // When streaming finishes, focus the input without scrolling the page
   useEffect(() => {
     if (status === 'ready' && messages.length > 0) {
-      const t = setTimeout(() => chatInputRef.current?.focus(), 100);
+      const t = setTimeout(() => chatInputRef.current?.focus({ preventScroll: true }), 100);
       return () => clearTimeout(t);
     }
   }, [status]);
