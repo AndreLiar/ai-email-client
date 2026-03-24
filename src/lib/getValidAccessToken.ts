@@ -1,26 +1,21 @@
-//src/lib/getValidAccessToken.ts
-import { clerkClient } from '@clerk/nextjs/server';
+// src/lib/getValidAccessToken.ts
+import { cookies } from 'next/headers';
 
-export async function getValidAccessToken(userId: string): Promise<string> {
-  // Get the Clerk client once
-  const clerk = await clerkClient();
-  
-  const user = await clerk.users.getUser(userId);
-  const metadata = user.privateMetadata;
-  let accessToken = metadata?.gmailAccessToken as string;
-  const refreshToken = metadata?.refreshToken as string;
+export async function getValidAccessToken(): Promise<string> {
+  const cookieStore = await cookies();
+  let accessToken = cookieStore.get('gmail_access_token')?.value;
+  const refreshToken = cookieStore.get('gmail_refresh_token')?.value;
 
-  if (!accessToken) throw new Error('Aucun accessToken Gmail trouvé.');
+  if (!accessToken) throw new Error('Gmail not connected');
 
+  // Test if token is still valid
   const testRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  if (testRes.status !== 401) {
-    return accessToken;
-  }
+  if (testRes.status !== 401) return accessToken;
 
-  if (!refreshToken) throw new Error('Aucun refreshToken disponible pour rafraîchissement.');
+  if (!refreshToken) throw new Error('Gmail token expired. Please reconnect.');
 
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -36,18 +31,10 @@ export async function getValidAccessToken(userId: string): Promise<string> {
   const newTokens = await tokenRes.json();
 
   if (!newTokens.access_token) {
-    console.error('❌ Échec du refresh Gmail:', newTokens);
-    throw new Error('Impossible de rafraîchir le token Gmail.');
+    throw new Error('Failed to refresh Gmail token. Please reconnect.');
   }
 
-  // Use the same clerk instance to update user metadata
-  await clerk.users.updateUserMetadata(userId, {
-    privateMetadata: {
-      gmailAccessToken: newTokens.access_token,
-      expiresIn: newTokens.expires_in,
-    },
-  });
-
-  console.log('🔁 Nouveau access_token Gmail rafraîchi avec succès.');
+  // Note: can't set cookies from server actions directly — token will be refreshed next request
+  console.log('Gmail access token refreshed successfully.');
   return newTokens.access_token;
 }

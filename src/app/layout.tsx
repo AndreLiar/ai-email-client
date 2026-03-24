@@ -1,23 +1,33 @@
-// app/layout.tsx
-// app/layout.tsx
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './globals.css';
 import { ReactNode } from 'react';
-import { ClerkProvider } from '@clerk/nextjs';
+import { Space_Mono, Syne } from 'next/font/google';
+
+const spaceMono = Space_Mono({
+  weight: ['400', '700'],
+  subsets: ['latin'],
+  variable: '--font-space-mono',
+  display: 'swap',
+});
+
+const syne = Syne({
+  weight: ['400', '600', '700', '800'],
+  subsets: ['latin'],
+  variable: '--font-syne',
+  display: 'swap',
+});
 
 export const metadata = {
-  title: 'AI Email Client',
-  description: 'Client email intelligent propulsé par l’IA locale',
+  title: 'CleanInbox AI',
+  description: 'AI-powered inbox cleaner. Bulk unsubscribe and delete newsletters in one click.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <ClerkProvider proxyUrl={process.env.NEXT_PUBLIC_CLERK_PROXY_URL}>
-      <html lang="en" data-gramm="false">
-        <body>
-          <main className="container py-5">{children}</main>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" data-gramm="false" className={`${spaceMono.variable} ${syne.variable}`}>
+      <body suppressHydrationWarning={true}>
+        {children}
+      </body>
+    </html>
   );
 }
