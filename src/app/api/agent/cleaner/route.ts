@@ -1,12 +1,12 @@
 // src/app/api/agent/cleaner/route.ts
-// Vercel AI SDK v6 streaming agent — Gemini 1.5 Flash with Groq llama-3.3-70b-versatile fallback
+// Vercel AI SDK v6 streaming agent — Gemini 2.0 Flash with Groq llama-3.3-70b-versatile fallback
 import { getValidAccessToken } from '@/lib/getValidAccessToken';
 import { formatEmailAsMime } from '@/lib/formatEmailAsMime';
 import { streamText, generateText, tool, convertToModelMessages, stepCountIs } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-import { createGroq } from '@ai-sdk/groq';
 import { z } from 'zod';
 
 export const maxDuration = 60;
@@ -19,7 +19,7 @@ const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
 async function selectModel() {
   try {
     const probe = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -34,7 +34,7 @@ async function selectModel() {
       console.warn('[AI] Gemini rate limited — switching to Groq llama-3.3-70b-versatile');
       return { model: groq('llama-3.3-70b-versatile'), provider: 'groq' as const };
     }
-    return { model: google('gemini-1.5-flash'), provider: 'gemini' as const };
+    return { model: google('gemini-2.0-flash'), provider: 'gemini' as const };
   } catch {
     console.warn('[AI] Gemini probe failed — switching to Groq llama-3.3-70b-versatile');
     return { model: groq('llama-3.3-70b-versatile'), provider: 'groq' as const };
@@ -46,7 +46,7 @@ async function classifyWithFallback(prompt: string): Promise<string> {
   // Try Gemini REST first
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
