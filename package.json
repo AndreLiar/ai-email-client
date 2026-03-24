@@ -13,8 +13,6 @@
   "dependencies": {
     "@ai-sdk/google": "^3.0.53",
     "@ai-sdk/react": "^3.0.139",
-    "@clerk/clerk-sdk-node": "^4.13.23",
-    "@clerk/nextjs": "^6.12.8",
     "@popperjs/core": "^2.11.8",
     "@supabase/supabase-js": "^2.49.1",
     "@types/recharts": "^1.8.29",
