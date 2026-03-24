@@ -42,6 +42,8 @@ const CATEGORY_COLORS: Record<string, { bg: string; color: string }> = {
   other:         { bg: 'rgba(120,120,140,0.15)',color: '#888899' },
 };
 
+const PAGE_SIZE = 20;
+
 export default function CleanerPage() {
   const router = useRouter();
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
@@ -52,6 +54,7 @@ export default function CleanerPage() {
   const [actionLog, setActionLog] = useState<string[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  const [page, setPage] = useState(0);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -80,6 +83,7 @@ export default function CleanerPage() {
       const res = await fetch('/api/agent/scan-senders');
       const data = await res.json();
       setScanResult(data);
+      setPage(0);
       log(`Scanned ${data.total} unread emails older than 6 months — ${data.senders.length} repetitive senders found.`);
     } catch {
       log('Error scanning inbox.');
@@ -161,6 +165,27 @@ export default function CleanerPage() {
 
   const selectedCount = selected.size;
   const doneCount = Object.values(senderStatuses).filter(s => s === 'done').length;
+
+  // Analytics derived from scan result
+  const analytics = scanResult ? (() => {
+    const s = scanResult.senders;
+    const totalEmails = s.reduce((sum, x) => sum + x.count, 0);
+    const autoUnsub = s.filter(x => x.canAutoUnsubscribe).length;
+    const highPriority = s.filter(x => x.count >= 10).length;
+    const oldest = s.reduce((min, x) => x.oldestDate < min ? x.oldestDate : min, Date.now());
+    const buckets = {
+      recent:  s.filter(x => monthsAgo(x.oldestDate) < 12).length,
+      old:     s.filter(x => monthsAgo(x.oldestDate) >= 12 && monthsAgo(x.oldestDate) < 24).length,
+      veryOld: s.filter(x => monthsAgo(x.oldestDate) >= 24).length,
+    };
+    return { totalEmails, autoUnsub, highPriority, oldest, buckets };
+  })() : null;
+
+  // Pagination
+  const totalPages = scanResult ? Math.ceil(scanResult.senders.length / PAGE_SIZE) : 0;
+  const pagedSenders = scanResult
+    ? scanResult.senders.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
+    : [];
 
   async function handleDisconnect() {
     await fetch('/api/auth/disconnect', { method: 'POST' });
@@ -576,6 +601,157 @@ export default function CleanerPage() {
         .cl-suggestion:hover:not(:disabled) { border-color: rgba(0,217,126,0.4); color: #00d97e; }
         .cl-suggestion:disabled { opacity: 0.3; cursor: not-allowed; }
 
+        /* ── analytics report ── */
+        .cl-report {
+          background: #0b1018;
+          border: 1px solid rgba(0,217,126,0.15);
+          margin-bottom: 2rem;
+          overflow: hidden;
+        }
+        .cl-report-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.65rem 1rem;
+          background: #0f1a20;
+          border-bottom: 1px solid rgba(0,217,126,0.1);
+        }
+        .cl-report-tag {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.62rem;
+          letter-spacing: 0.12em;
+          color: #00d97e;
+          text-transform: uppercase;
+        }
+        .cl-report-body { padding: 1.5rem; }
+        .cl-stat-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 1px;
+          background: rgba(0,217,126,0.08);
+          border: 1px solid rgba(0,217,126,0.08);
+          margin-bottom: 1.5rem;
+        }
+        @media (max-width: 700px) { .cl-stat-grid { grid-template-columns: repeat(2,1fr); } }
+        .cl-stat-cell {
+          background: #0b1018;
+          padding: 1rem 1.25rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+        .cl-stat-val {
+          font-size: 1.6rem;
+          font-weight: 800;
+          color: #00d97e;
+          letter-spacing: -0.02em;
+          line-height: 1;
+        }
+        .cl-stat-lbl {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.58rem;
+          letter-spacing: 0.1em;
+          color: #4a6a54;
+          text-transform: uppercase;
+        }
+        .cl-insights {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          margin-bottom: 1.5rem;
+        }
+        .cl-insight {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 0.65rem 0.9rem;
+          border-left: 2px solid;
+          font-size: 0.82rem;
+          line-height: 1.5;
+        }
+        .cl-insight-red   { border-color: #ff5f57; background: rgba(255,95,87,0.04); }
+        .cl-insight-green { border-color: #00d97e; background: rgba(0,217,126,0.04); }
+        .cl-insight-yellow{ border-color: #ffbd2e; background: rgba(255,189,46,0.04); }
+        .cl-insight-dim   { border-color: rgba(0,217,126,0.2); background: transparent; }
+        .cl-insight-icon { font-size: 1rem; flex-shrink: 0; }
+        .cl-insight-text { color: #7a9a84; }
+        .cl-insight-text strong { color: #c8d8cc; }
+        .cl-age-bar {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+        .cl-age-label {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.1em;
+          color: #4a6a54;
+          text-transform: uppercase;
+          margin-bottom: 0.25rem;
+        }
+        .cl-age-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+        .cl-age-name {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          color: #4a6a54;
+          width: 90px;
+          flex-shrink: 0;
+        }
+        .cl-age-track {
+          flex: 1;
+          height: 6px;
+          background: rgba(0,217,126,0.08);
+          position: relative;
+          overflow: hidden;
+        }
+        .cl-age-fill {
+          height: 100%;
+          transition: width 0.6s ease;
+        }
+        .cl-age-count {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.62rem;
+          color: #4a6a54;
+          width: 40px;
+          text-align: right;
+          flex-shrink: 0;
+        }
+
+        /* ── pagination ── */
+        .cl-pagination {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.75rem 1rem;
+          border-top: 1px solid rgba(0,217,126,0.08);
+          background: #0f1a20;
+        }
+        .cl-page-info {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          color: #4a6a54;
+          letter-spacing: 0.06em;
+        }
+        .cl-page-btns { display: flex; gap: 0.4rem; }
+        .cl-page-btn {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          letter-spacing: 0.06em;
+          padding: 0.3rem 0.75rem;
+          background: transparent;
+          border: 1px solid rgba(0,217,126,0.2);
+          color: #4a6a54;
+          cursor: pointer;
+          transition: border-color 0.2s, color 0.2s;
+        }
+        .cl-page-btn:hover:not(:disabled) { border-color: #00d97e; color: #00d97e; }
+        .cl-page-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+        .cl-page-btn.active { border-color: #00d97e; color: #00d97e; background: rgba(0,217,126,0.06); }
+
         /* ── scan results ── */
         .cl-scan-bar {
           display: flex;
@@ -931,6 +1107,118 @@ export default function CleanerPage() {
         </div>
       )}
 
+      {/* ── Analytics Report ── */}
+      {scanResult && analytics && (
+        <div className="cl-report">
+          <div className="cl-report-bar">
+            <span className="cl-report-tag">// scan_report</span>
+            <span style={{ fontFamily: 'var(--font-space-mono)', fontSize: '0.58rem', color: '#2a4a34', letterSpacing: '0.08em' }}>
+              UNREAD · OLDER THAN 6 MONTHS · REPETITIVE SENDERS
+            </span>
+          </div>
+          <div className="cl-report-body">
+
+            {/* ── 4 stat cards ── */}
+            <div className="cl-stat-grid">
+              <div className="cl-stat-cell">
+                <span className="cl-stat-val">{scanResult.total.toLocaleString()}</span>
+                <span className="cl-stat-lbl">Stale Emails Found</span>
+              </div>
+              <div className="cl-stat-cell">
+                <span className="cl-stat-val">{scanResult.senders.length}</span>
+                <span className="cl-stat-lbl">Repetitive Senders</span>
+              </div>
+              <div className="cl-stat-cell">
+                <span className="cl-stat-val">{analytics.autoUnsub}</span>
+                <span className="cl-stat-lbl">Auto-Unsubscribable</span>
+              </div>
+              <div className="cl-stat-cell">
+                <span className="cl-stat-val" style={{ color: monthsAgo(analytics.oldest) >= 24 ? '#ff5f57' : '#ffbd2e' }}>
+                  {monthsAgo(analytics.oldest)}mo
+                </span>
+                <span className="cl-stat-lbl">Oldest Unread Email</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              {/* ── Insights ── */}
+              <div>
+                <p className="cl-age-label">// insights</p>
+                <div className="cl-insights">
+                  {analytics.highPriority > 0 && (
+                    <div className="cl-insight cl-insight-red">
+                      <span className="cl-insight-icon">🔴</span>
+                      <span className="cl-insight-text">
+                        <strong>{analytics.highPriority} sender{analytics.highPriority > 1 ? 's' : ''}</strong> sent you 10+ emails you never opened — high priority to clean.
+                      </span>
+                    </div>
+                  )}
+                  <div className="cl-insight cl-insight-green">
+                    <span className="cl-insight-icon">⚡</span>
+                    <span className="cl-insight-text">
+                      <strong>{analytics.autoUnsub} sender{analytics.autoUnsub !== 1 ? 's' : ''}</strong> support one-click unsubscribe — no manual action needed.
+                    </span>
+                  </div>
+                  <div className="cl-insight cl-insight-yellow">
+                    <span className="cl-insight-icon">🗓️</span>
+                    <span className="cl-insight-text">
+                      Your oldest unread email is <strong>{monthsAgo(analytics.oldest)} months old</strong> (since {formatDate(analytics.oldest)}) — you clearly don't need it.
+                    </span>
+                  </div>
+                  <div className="cl-insight cl-insight-dim">
+                    <span className="cl-insight-icon">🗑️</span>
+                    <span className="cl-insight-text">
+                      Cleaning everything would remove <strong>{analytics.totalEmails.toLocaleString()} emails</strong> from your mailbox in one shot.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Age breakdown ── */}
+              <div>
+                <p className="cl-age-label">// age breakdown (by sender)</p>
+                <div className="cl-age-bar">
+                  {[
+                    { label: '6–12 months', count: analytics.buckets.recent, color: '#ffbd2e' },
+                    { label: '1–2 years',   count: analytics.buckets.old,    color: '#ff8c57' },
+                    { label: '2+ years',    count: analytics.buckets.veryOld, color: '#ff5f57' },
+                  ].map(({ label, count, color }) => (
+                    <div key={label} className="cl-age-row">
+                      <span className="cl-age-name">{label}</span>
+                      <div className="cl-age-track">
+                        <div
+                          className="cl-age-fill"
+                          style={{
+                            width: scanResult.senders.length > 0
+                              ? `${Math.round((count / scanResult.senders.length) * 100)}%`
+                              : '0%',
+                            background: color,
+                          }}
+                        />
+                      </div>
+                      <span className="cl-age-count">{count}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: '1.25rem' }}>
+                  <p className="cl-age-label">// recommendation</p>
+                  <p style={{ fontFamily: 'var(--font-space-mono)', fontSize: '0.68rem', color: '#4a6a54', lineHeight: 1.8, margin: 0 }}>
+                    {analytics.buckets.veryOld > 0 && (
+                      <>Start with the <span style={{ color: '#ff5f57' }}>{analytics.buckets.veryOld} senders</span> from 2+ years ago — you've had 2 years to read them.<br /></>
+                    )}
+                    {analytics.autoUnsub > 0 && (
+                      <>Use <span style={{ color: '#00d97e' }}>UNSUB + TRASH</span> on the {analytics.autoUnsub} auto-unsubscribable senders to prevent future emails.<br /></>
+                    )}
+                    Select all and bulk-clean in one click if unsure.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Scan results ── */}
       {scanResult && (
         <>
@@ -980,7 +1268,7 @@ export default function CleanerPage() {
                 </tr>
               </thead>
               <tbody>
-                {scanResult.senders.map(sender => {
+                {pagedSenders.map(sender => {
                   const st = senderStatuses[sender.email] || 'idle';
                   const busy = st === 'deleting' || st === 'unsubscribing';
                   const cat = sender.category;
@@ -1081,6 +1369,34 @@ export default function CleanerPage() {
                 })}
               </tbody>
             </table>
+            {totalPages > 1 && (
+              <div className="cl-pagination">
+                <span className="cl-page-info">
+                  SHOWING {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, scanResult!.senders.length)} OF {scanResult!.senders.length} SENDERS
+                </span>
+                <div className="cl-page-btns">
+                  <button
+                    className="cl-page-btn"
+                    disabled={page === 0}
+                    onClick={() => setPage(p => p - 1)}
+                  >← PREV</button>
+                  {Array.from({ length: totalPages }, (_, i) => (
+                    <button
+                      key={i}
+                      className={`cl-page-btn${page === i ? ' active' : ''}`}
+                      onClick={() => setPage(i)}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                  <button
+                    className="cl-page-btn"
+                    disabled={page >= totalPages - 1}
+                    onClick={() => setPage(p => p + 1)}
+                  >NEXT →</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
