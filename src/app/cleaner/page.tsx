@@ -2,7 +2,7 @@
 
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -71,25 +71,40 @@ export default function CleanerPage() {
       .then(d => setGmailConnected(d.connected));
   }, []);
 
+  // Keep a ref to the latest scanResult so the transport reads it at send-time
+  const scanContextRef = useRef<ScanResult | null>(null);
+  useEffect(() => { scanContextRef.current = scanResult; }, [scanResult]);
+
+  // Custom transport — uses a custom fetch that injects scan context at call time
+  const transport = useMemo(() => new DefaultChatTransport({
+    api: '/api/agent/cleaner',
+    fetch: async (url, init) => {
+      const ctx = scanContextRef.current;
+      const existing = JSON.parse((init?.body as string) || '{}');
+      return fetch(url as string, {
+        ...init,
+        body: JSON.stringify({
+          ...existing,
+          scanContext: ctx
+            ? {
+                total: ctx.total,
+                senders: ctx.senders.slice(0, 80).map(s => ({
+                  displayName: s.displayName,
+                  email: s.email,
+                  count: s.count,
+                  canAutoUnsubscribe: s.canAutoUnsubscribe,
+                  oldestDate: s.oldestDate,
+                })),
+              }
+            : null,
+        }),
+      });
+    },
+  }), []);
+
   const { messages, status, sendMessage } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/agent/cleaner',
-      // Pass current scan results so the agent doesn't need to re-scan
-      body: scanResult
-        ? {
-            scanContext: {
-              total: scanResult.total,
-              senders: scanResult.senders.slice(0, 80).map(s => ({
-                displayName: s.displayName,
-                email: s.email,
-                count: s.count,
-                canAutoUnsubscribe: s.canAutoUnsubscribe,
-                oldestDate: s.oldestDate,
-              })),
-            },
-          }
-        : {},
-    }),
+    transport,
+    onError: (err) => log(`Agent error: ${err.message}`),
   });
 
   const isLoading = status === 'submitted' || status === 'streaming';
