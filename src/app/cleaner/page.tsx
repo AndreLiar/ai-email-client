@@ -33,6 +33,12 @@ function formatDate(ts: number): string {
 
 type SenderStatus = 'idle' | 'deleting' | 'unsubscribing' | 'done' | 'error';
 
+type ScanLine = {
+  text: string;
+  type: 'info' | 'progress' | 'success' | 'error';
+  progress?: number; // 0-100
+};
+
 const CATEGORY_COLORS: Record<string, { bg: string; color: string }> = {
   newsletter:    { bg: 'rgba(0,217,126,0.15)',  color: '#00d97e' },
   job_alert:     { bg: 'rgba(255,189,46,0.15)', color: '#ffbd2e' },
@@ -55,6 +61,8 @@ export default function CleanerPage() {
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [page, setPage] = useState(0);
+  const [scanLines, setScanLines] = useState<ScanLine[]>([]);
+  const scanTermRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,20 +81,73 @@ export default function CleanerPage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Auto-scroll scan terminal
+  useEffect(() => {
+    scanTermRef.current?.scrollTo({ top: scanTermRef.current.scrollHeight, behavior: 'smooth' });
+  }, [scanLines]);
+
+  const pushLine = (line: ScanLine) =>
+    setScanLines(prev => {
+      // Replace last line if it's a progress update of the same type
+      if (line.type === 'progress' && prev.length > 0 && prev[prev.length - 1].type === 'progress') {
+        return [...prev.slice(0, -1), line];
+      }
+      return [...prev, line];
+    });
+
   const scanInbox = async () => {
     setScanning(true);
     setScanResult(null);
+    setScanLines([]);
     setSelected(new Set());
     setSenderStatuses({});
     setActionLog([]);
+
     try {
       const res = await fetch('/api/agent/scan-senders');
-      const data = await res.json();
-      setScanResult(data);
-      setPage(0);
-      log(`Scanned ${data.total} unread emails older than 6 months — ${data.senders.length} repetitive senders found.`);
-    } catch {
-      log('Error scanning inbox.');
+      if (!res.body) throw new Error('No response body');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+
+            if (evt.phase === 'init' || evt.phase === 'ids' || evt.phase === 'grouping') {
+              pushLine({ text: evt.message, type: 'info' });
+            } else if (evt.phase === 'ids_done') {
+              pushLine({ text: evt.message, type: 'info' });
+            } else if (evt.phase === 'metadata') {
+              pushLine({ text: evt.message, type: 'progress', progress: evt.progress });
+            } else if (evt.phase === 'done') {
+              pushLine({ text: evt.message, type: 'success' });
+              if (evt.result) {
+                setScanResult(evt.result);
+                setPage(0);
+                log(`Scan complete — ${evt.result.senders.length} senders, ${evt.result.total.toLocaleString()} stale emails.`);
+              }
+            } else if (evt.phase === 'error') {
+              pushLine({ text: evt.message, type: 'error' });
+              log(`Scan error: ${evt.message}`);
+            }
+          } catch { /* malformed event, skip */ }
+        }
+      }
+    } catch (err: any) {
+      pushLine({ text: `Connection error: ${err.message}`, type: 'error' });
+      log('Scan failed.');
     } finally {
       setScanning(false);
     }
@@ -601,6 +662,69 @@ export default function CleanerPage() {
         .cl-suggestion:hover:not(:disabled) { border-color: rgba(0,217,126,0.4); color: #00d97e; }
         .cl-suggestion:disabled { opacity: 0.3; cursor: not-allowed; }
 
+        /* ── scan terminal ── */
+        .cl-scan-terminal {
+          background: #06090f;
+          border: 1px solid rgba(0,217,126,0.2);
+          margin-bottom: 2rem;
+          overflow: hidden;
+        }
+        .cl-scan-term-bar {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 0.65rem 1rem;
+          background: #0f1a20;
+          border-bottom: 1px solid rgba(0,217,126,0.1);
+        }
+        .cl-scan-term-title {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.62rem;
+          color: #4a6a54;
+          margin-left: 0.5rem;
+          letter-spacing: 0.05em;
+        }
+        .cl-scan-term-body {
+          padding: 1rem 1.25rem;
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.72rem;
+          line-height: 2;
+          max-height: 260px;
+          overflow-y: auto;
+        }
+        .cl-term-line { display: flex; align-items: center; gap: 0.6rem; }
+        .cl-term-arrow { color: #4a6a54; flex-shrink: 0; }
+        .cl-term-info    { color: #5a8a64; }
+        .cl-term-success { color: #00d97e; font-weight: 600; }
+        .cl-term-error   { color: #ff5f57; }
+        .cl-term-progress-wrap {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex: 1;
+        }
+        .cl-term-progress-text { color: #ffbd2e; }
+        .cl-term-bar-track {
+          flex: 1;
+          height: 3px;
+          background: rgba(255,189,46,0.15);
+          max-width: 160px;
+        }
+        .cl-term-bar-fill {
+          height: 100%;
+          background: #ffbd2e;
+          transition: width 0.3s ease;
+        }
+        .cl-term-cursor {
+          display: inline-block;
+          width: 7px; height: 13px;
+          background: #00d97e;
+          vertical-align: middle;
+          margin-left: 2px;
+          animation: cl-blink 1s step-end infinite;
+        }
+        @keyframes cl-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
         /* ── analytics report ── */
         .cl-report {
           background: #0b1018;
@@ -1003,22 +1127,55 @@ export default function CleanerPage() {
             onClick={scanInbox}
             disabled={scanning}
           >
-            {scanning ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{
-                  width: 10, height: 10,
-                  border: '1.5px solid rgba(6,9,15,0.3)',
-                  borderTopColor: '#06090f',
-                  borderRadius: '50%',
-                  display: 'inline-block',
-                  animation: 'cl-spin 0.7s linear infinite',
-                }} />
-                SCANNING...
-              </span>
-            ) : 'SCAN INBOX'}
+            {scanning ? 'SCANNING...' : 'SCAN INBOX'}
           </button>
         </div>
       </div>
+
+      {/* ── Scan Terminal ── */}
+      {scanLines.length > 0 && (
+        <div className="cl-scan-terminal">
+          <div className="cl-scan-term-bar">
+            <div className="cl-dot cl-dot-r" />
+            <div className="cl-dot cl-dot-y" />
+            <div className="cl-dot cl-dot-g" />
+            <span className="cl-scan-term-title">inbox-cleaner — scan</span>
+          </div>
+          <div className="cl-scan-term-body" ref={scanTermRef}>
+            <div className="cl-term-line">
+              <span className="cl-term-arrow">$</span>
+              <span className="cl-term-info">scan --unread --older_than=180d --entire_mailbox</span>
+            </div>
+            {scanLines.map((line, i) => (
+              <div key={i} className="cl-term-line">
+                <span className="cl-term-arrow">↳</span>
+                {line.type === 'progress' ? (
+                  <div className="cl-term-progress-wrap">
+                    <span className="cl-term-progress-text">{line.text}</span>
+                    <div className="cl-term-bar-track">
+                      <div className="cl-term-bar-fill" style={{ width: `${line.progress ?? 0}%` }} />
+                    </div>
+                  </div>
+                ) : (
+                  <span className={
+                    line.type === 'success' ? 'cl-term-success' :
+                    line.type === 'error'   ? 'cl-term-error' :
+                    'cl-term-info'
+                  }>
+                    {line.text}
+                  </span>
+                )}
+              </div>
+            ))}
+            {scanning && (
+              <div className="cl-term-line">
+                <span className="cl-term-arrow" style={{ opacity: 0 }}>↳</span>
+                <span className="cl-term-cursor" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── AI Agent Chat ── */}
       {showChat && (
