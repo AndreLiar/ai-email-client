@@ -62,8 +62,8 @@ export async function GET() {
 
         send({ phase: 'ids_done', message: `Found ${ids.length.toLocaleString()} stale emails. Fetching details...`, count: ids.length });
 
-        // ── Phase 2: fetch metadata in batches of 200 ───────────────────────
-        const BATCH = 200;
+        // ── Phase 2: fetch metadata in batches of 100 ───────────────────────
+        const BATCH = 100;
         const metadataList: any[] = [];
 
         for (let i = 0; i < ids.length; i += BATCH) {
@@ -75,11 +75,16 @@ export async function GET() {
                   `&metadataHeaders=From` +
                   `&metadataHeaders=List-Unsubscribe` +
                   `&metadataHeaders=List-Unsubscribe-Post`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
-              ).then(r => r.json())
+                {
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                  signal: AbortSignal.timeout(8000),
+                }
+              )
+                .then(r => r.json())
+                .catch(() => null)   // skip stalled/failed requests rather than hanging
             )
           );
-          metadataList.push(...results);
+          metadataList.push(...results.filter(Boolean));
 
           const pct = Math.min(Math.round(((i + chunk.length) / ids.length) * 100), 100);
           send({
