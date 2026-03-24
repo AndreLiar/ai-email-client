@@ -68,7 +68,7 @@ async function classifyWithFallback(prompt: string): Promise<string> {
 }
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages, scanContext } = await req.json();
 
   let accessToken: string;
   try {
@@ -272,20 +272,30 @@ Respond ONLY with a JSON array like:
     }),
   };
 
+  // Build system prompt — inject scan context if available so agent skips re-scanning
+  let systemPrompt = `You are an Inbox Cleaner Agent. Your job is to help users clean their Gmail inbox.
+
+Rules:
+- If scan results are provided below, use them directly — do NOT call scanInbox again.
+- Classify senders using classifySenders before taking action if categories are unknown.
+- Execute delete/unsubscribe actions immediately when the user asks — do not ask for extra confirmation unless the sender looks transactional.
+- Flag "transactional" senders (banks, Stripe, receipts) as risky — warn before deleting.
+- Be concise. After each action, report what was done and how many emails were affected.`;
+
+  if (scanContext?.senders?.length > 0) {
+    systemPrompt += `\n\n## SCAN RESULTS (already available — do NOT call scanInbox)\n`;
+    systemPrompt += `Total stale unread emails: ${scanContext.total}\n`;
+    systemPrompt += `Senders (sorted by email count):\n`;
+    for (const s of scanContext.senders) {
+      systemPrompt += `- "${s.displayName}" <${s.email}>: ${s.count} emails, autoUnsub: ${s.canAutoUnsubscribe}\n`;
+    }
+    systemPrompt += `\nWhen the user asks to delete/unsubscribe by category, call classifySenders first to identify which senders belong to that category, then act on them.`;
+  }
+
   const result = streamText({
     model,
     stopWhen: stepCountIs(10),
-    system: `You are an Inbox Cleaner Agent. Your job is to help users clean their Gmail inbox by:
-1. Scanning their inbox to find senders grouped by volume
-2. Classifying senders (newsletter, job_alert, promo, social, transactional, other)
-3. Executing unsubscribe and/or bulk delete actions when asked
-
-Rules:
-- Always scan before taking action unless you already have scan results
-- Ask for confirmation before deleting or unsubscribing in bulk
-- Flag "transactional" senders (banks, Stripe, receipts) as risky to delete — warn the user
-- Be concise. Present sender groups as a clear table in markdown.
-- After each action, report what was done and how many emails were affected.`,
+    system: systemPrompt,
 
     messages: modelMessages,
     tools,

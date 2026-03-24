@@ -72,7 +72,24 @@ export default function CleanerPage() {
   }, []);
 
   const { messages, status, sendMessage } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/agent/cleaner' }),
+    transport: new DefaultChatTransport({
+      api: '/api/agent/cleaner',
+      // Pass current scan results so the agent doesn't need to re-scan
+      body: scanResult
+        ? {
+            scanContext: {
+              total: scanResult.total,
+              senders: scanResult.senders.slice(0, 80).map(s => ({
+                displayName: s.displayName,
+                email: s.email,
+                count: s.count,
+                canAutoUnsubscribe: s.canAutoUnsubscribe,
+                oldestDate: s.oldestDate,
+              })),
+            },
+          }
+        : {},
+    }),
   });
 
   const isLoading = status === 'submitted' || status === 'streaming';
@@ -223,6 +240,20 @@ export default function CleanerPage() {
       .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
       .map(p => p.text)
       .join('');
+
+  const TOOL_LABELS: Record<string, string> = {
+    scanInbox:             '🔍 Scanning inbox...',
+    classifySenders:       '🏷️  Classifying senders...',
+    deleteEmailsFromSender:'🗑️  Deleting emails...',
+    unsubscribeFromSender: '✉️  Unsubscribing...',
+  };
+
+  const TOOL_DONE: Record<string, (r: any) => string> = {
+    scanInbox:             r => `✓ Scanned ${r?.totalScanned ?? 0} emails — ${r?.senders?.length ?? 0} senders found`,
+    classifySenders:       r => `✓ Classified ${r?.classifications?.length ?? 0} senders`,
+    deleteEmailsFromSender:r => `✓ Trashed ${r?.deleted ?? 0} emails from ${r?.senderEmail}`,
+    unsubscribeFromSender: r => `✓ Unsubscribed from ${r?.senderEmail} (${r?.method ?? 'none'})`,
+  };
 
   const selectedCount = selected.size;
   const doneCount = Object.values(senderStatuses).filter(s => s === 'done').length;
@@ -1197,18 +1228,62 @@ export default function CleanerPage() {
               </div>
             )}
             {messages.map(m => {
-              const text = getMessageText(m);
-              if (!text) return null;
               const isUser = m.role === 'user';
+              const text = getMessageText(m);
+
+              // Tool invocation parts (agent only)
+              const toolParts: any[] = isUser ? [] : m.parts.filter(p => p.type === 'tool-invocation');
+
+              if (!text && toolParts.length === 0) return null;
+
               return (
                 <div key={m.id} className={isUser ? 'cl-msg-user' : 'cl-msg-agent'}>
-                  <div>
+                  <div style={{ maxWidth: '85%' }}>
                     <div className={`cl-msg-label ${isUser ? 'cl-msg-label-user' : 'cl-msg-label-agent'}`}>
                       {isUser ? 'YOU' : 'AGENT'}
                     </div>
-                    <div className={`cl-msg-bubble ${isUser ? 'cl-msg-bubble-user' : 'cl-msg-bubble-agent'}`}>
-                      <ReactMarkdown>{text}</ReactMarkdown>
-                    </div>
+
+                    {/* Tool steps */}
+                    {toolParts.map((p, i) => {
+                      const name = p.toolInvocation?.toolName ?? p.toolName ?? '';
+                      const state = p.toolInvocation?.state ?? p.state ?? '';
+                      const result = state === 'result' ? (p.toolInvocation?.result ?? p.result) : null;
+                      const isDone = state === 'result';
+                      return (
+                        <div key={i} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.3rem 0.6rem',
+                          marginBottom: '0.25rem',
+                          background: 'rgba(0,217,126,0.04)',
+                          border: '1px solid rgba(0,217,126,0.1)',
+                          fontFamily: 'var(--font-space-mono)',
+                          fontSize: '0.65rem',
+                          letterSpacing: '0.04em',
+                        }}>
+                          {!isDone && (
+                            <span style={{ display: 'flex', gap: 3 }}>
+                              {[0,1,2].map(j => (
+                                <span key={j} className="cl-thinking-dot" style={{ animationDelay: `${j * 0.2}s` }} />
+                              ))}
+                            </span>
+                          )}
+                          <span style={{ color: isDone ? '#00d97e' : '#4a6a54' }}>
+                            {isDone
+                              ? (TOOL_DONE[name]?.(result) ?? `✓ ${name} done`)
+                              : (TOOL_LABELS[name] ?? `Running ${name}...`)}
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Text response */}
+                    {text && (
+                      <div className={`cl-msg-bubble ${isUser ? 'cl-msg-bubble-user' : 'cl-msg-bubble-agent'}`}>
+                        <ReactMarkdown>{text}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
