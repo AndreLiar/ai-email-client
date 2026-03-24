@@ -89,7 +89,7 @@ export default function CleanerPage() {
           scanContext: ctx
             ? {
                 total: ctx.total,
-                senders: ctx.senders.slice(0, 80).map(s => ({
+                senders: ctx.senders.slice(0, 50).map(s => ({
                   displayName: s.displayName,
                   email: s.email,
                   count: s.count,
@@ -117,12 +117,13 @@ export default function CleanerPage() {
     }
   }, [messages]);
 
-  // When agent finishes, focus the input so user can type immediately
+  // When streaming finishes, focus the input after a short delay
   useEffect(() => {
-    if (!isLoading && messages.length > 0) {
-      chatInputRef.current?.focus();
+    if (status === 'ready' && messages.length > 0) {
+      const t = setTimeout(() => chatInputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
     }
-  }, [isLoading]);
+  }, [status]);
 
   // Auto-scroll scan terminal
   useEffect(() => {

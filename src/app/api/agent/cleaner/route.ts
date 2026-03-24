@@ -285,13 +285,15 @@ Rules:
 - Be concise. After each action, report what was done and how many emails were affected.`;
 
   if (scanContext?.senders?.length > 0) {
+    // Cap at 40 senders — longer lists cause Gemini to generate invalid tool calls
+    const topSenders = scanContext.senders.slice(0, 40);
     systemPrompt += `\n\n## SCAN RESULTS (already available — do NOT call scanInbox)\n`;
-    systemPrompt += `Total stale unread emails: ${scanContext.total}\n`;
+    systemPrompt += `Total stale unread emails: ${scanContext.total}. Total senders found: ${scanContext.senders.length} (showing top ${topSenders.length}).\n`;
     systemPrompt += `Senders (sorted by email count):\n`;
-    for (const s of scanContext.senders) {
+    for (const s of topSenders) {
       systemPrompt += `- "${s.displayName}" <${s.email}>: ${s.count} emails, autoUnsub: ${s.canAutoUnsubscribe}\n`;
     }
-    systemPrompt += `\nWhen the user asks to delete/unsubscribe by category, call classifySenders first to identify which senders belong to that category, then act on them.`;
+    systemPrompt += `\nWhen the user asks to delete/unsubscribe by category, call classifySenders first (pass ALL listed senders) to identify which belong to that category, then act on them.`;
   }
 
   const result = streamText({
