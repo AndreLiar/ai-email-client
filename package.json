@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.53",
+    "@ai-sdk/groq": "^3.0.31",
     "@ai-sdk/react": "^3.0.139",
     "@popperjs/core": "^2.11.8",
     "@supabase/supabase-js": "^2.49.1",
