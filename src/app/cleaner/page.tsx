@@ -64,6 +64,14 @@ export default function CleanerPage() {
   const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
   const [classifying, setClassifying] = useState(false);
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
+  const [confirmModal, setConfirmModal] = useState<{
+    label: string;
+    senders: SenderRow[];
+    emailCount: number;
+  } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{
+    label: string; done: number; total: number;
+  } | null>(null);
   const scanTermRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
@@ -311,6 +319,30 @@ export default function CleanerPage() {
     }
   };
 
+  const runCategoryClean = async (senders: SenderRow[], label: string) => {
+    setConfirmModal(null);
+    setBulkProgress({ label, done: 0, total: senders.length });
+    for (let i = 0; i < senders.length; i++) {
+      const s = senders[i];
+      if (s.canAutoUnsubscribe) await unsubAndTrashSender(s);
+      else await trashSender(s.email);
+      setBulkProgress({ label, done: i + 1, total: senders.length });
+    }
+    setBulkProgress(null);
+  };
+
+  const runUnsubQueue = () => {
+    if (!scanResult) return;
+    const auto = scanResult.senders.filter(s => s.canAutoUnsubscribe &&
+      (senderStatuses[s.email] || 'idle') === 'idle');
+    if (!auto.length) return;
+    setConfirmModal({
+      label: `UNSUB + TRASH ALL AUTO (${auto.length} senders)`,
+      senders: auto,
+      emailCount: auto.reduce((n, s) => n + s.count, 0),
+    });
+  };
+
   const getMessageText = (message: (typeof messages)[0]) =>
     message.parts
       .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
@@ -350,6 +382,24 @@ export default function CleanerPage() {
     };
     return { totalEmails, autoUnsub, highPriority, oldest, buckets };
   })() : null;
+
+  // Category groups (derived from classified senders)
+  const categoryGroups = useMemo(() => {
+    if (!scanResult) return [];
+    const map: Record<string, SenderRow[]> = {};
+    for (const s of scanResult.senders) {
+      if (!s.category) continue;
+      if (!map[s.category]) map[s.category] = [];
+      map[s.category].push(s);
+    }
+    return Object.entries(map)
+      .map(([cat, sds]) => ({
+        cat,
+        sds,
+        total: sds.reduce((n, s) => n + s.count, 0),
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [scanResult]);
 
   // Pagination
   const totalPages = scanResult ? Math.ceil(scanResult.senders.length / PAGE_SIZE) : 0;
@@ -1215,6 +1265,172 @@ export default function CleanerPage() {
           line-height: 1.8;
         }
         .cl-empty-hint em { color: #4a6a54; font-style: normal; }
+
+        /* ── category bulk actions ── */
+        .cl-cat-actions {
+          margin-bottom: 1.5rem;
+        }
+        .cl-cat-actions-header {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.15em;
+          color: #4a6a54;
+          text-transform: uppercase;
+          margin-bottom: 0.65rem;
+        }
+        .cl-cat-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          align-items: center;
+        }
+        .cl-cat-chip {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          letter-spacing: 0.06em;
+          padding: 0.4rem 0.85rem;
+          border: 1px solid;
+          background: transparent;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.1s;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .cl-cat-chip:hover:not(:disabled) { opacity: 0.8; transform: translateY(-1px); }
+        .cl-cat-chip:disabled { opacity: 0.25; cursor: not-allowed; }
+        .cl-cat-chip-count {
+          font-size: 0.58rem;
+          opacity: 0.7;
+        }
+        .cl-unsub-chip {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          letter-spacing: 0.06em;
+          padding: 0.4rem 0.85rem;
+          border: 1px solid rgba(0,217,126,0.4);
+          color: #00d97e;
+          background: rgba(0,217,126,0.06);
+          cursor: pointer;
+          transition: background 0.15s, transform 0.1s;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .cl-unsub-chip:hover:not(:disabled) { background: rgba(0,217,126,0.12); transform: translateY(-1px); }
+        .cl-unsub-chip:disabled { opacity: 0.25; cursor: not-allowed; }
+
+        /* ── bulk progress bar ── */
+        .cl-bulk-progress {
+          background: #0b1018;
+          border: 1px solid rgba(0,217,126,0.2);
+          padding: 1rem 1.25rem;
+          margin-bottom: 1.5rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.6rem;
+        }
+        .cl-bulk-progress-label {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.68rem;
+          color: #00d97e;
+          letter-spacing: 0.06em;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .cl-bulk-progress-count {
+          color: #4a6a54;
+          font-size: 0.62rem;
+        }
+        .cl-bulk-track {
+          height: 4px;
+          background: rgba(0,217,126,0.1);
+          overflow: hidden;
+        }
+        .cl-bulk-fill {
+          height: 100%;
+          background: #00d97e;
+          transition: width 0.3s ease;
+        }
+
+        /* ── confirm modal ── */
+        .cl-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(6,9,15,0.85);
+          z-index: 100;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+        }
+        .cl-modal {
+          background: #0b1018;
+          border: 1px solid rgba(0,217,126,0.25);
+          padding: 2rem 2.5rem;
+          max-width: 440px;
+          width: 100%;
+          position: relative;
+        }
+        .cl-modal-tag {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.15em;
+          color: #00d97e;
+          text-transform: uppercase;
+          margin-bottom: 0.75rem;
+        }
+        .cl-modal-title {
+          font-size: 1.1rem;
+          font-weight: 700;
+          color: #f0f7f2;
+          letter-spacing: -0.01em;
+          margin-bottom: 0.5rem;
+        }
+        .cl-modal-sub {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.68rem;
+          color: #4a6a54;
+          line-height: 1.7;
+          margin-bottom: 1.5rem;
+        }
+        .cl-modal-warning {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          color: #ffbd2e;
+          padding: 0.5rem 0.75rem;
+          border: 1px solid rgba(255,189,46,0.2);
+          background: rgba(255,189,46,0.04);
+          margin-bottom: 1.5rem;
+          line-height: 1.6;
+        }
+        .cl-modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+        .cl-modal-cancel {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.68rem;
+          letter-spacing: 0.06em;
+          padding: 0.55rem 1.25rem;
+          background: transparent;
+          border: 1px solid rgba(200,216,204,0.15);
+          color: #4a6a54;
+          cursor: pointer;
+          transition: border-color 0.15s, color 0.15s;
+        }
+        .cl-modal-cancel:hover { border-color: rgba(200,216,204,0.3); color: #7a9a84; }
+        .cl-modal-confirm {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.68rem;
+          letter-spacing: 0.08em;
+          padding: 0.55rem 1.5rem;
+          background: #ff5f57;
+          border: none;
+          color: #fff;
+          font-weight: 700;
+          cursor: pointer;
+          transition: opacity 0.15s;
+        }
+        .cl-modal-confirm:hover { opacity: 0.85; }
       `}</style>
 
       {/* ── Page header ── */}
@@ -1225,6 +1441,20 @@ export default function CleanerPage() {
           <p className="cl-page-sub">scanning unread emails older than 6 months · repetitive senders only</p>
         </div>
         <div className="cl-header-actions">
+          {scanResult && (() => {
+            const autoCount = scanResult.senders.filter(s =>
+              s.canAutoUnsubscribe && (senderStatuses[s.email] || 'idle') === 'idle'
+            ).length;
+            return autoCount > 0 ? (
+              <button
+                className="cl-unsub-chip"
+                onClick={runUnsubQueue}
+                disabled={!!bulkProgress}
+              >
+                ⚡ UNSUB ALL AUTO <span className="cl-cat-chip-count">({autoCount})</span>
+              </button>
+            ) : null;
+          })()}
           <button
             className="cl-btn-outline"
             onClick={() => setShowChat(v => !v)}
@@ -1535,6 +1765,51 @@ export default function CleanerPage() {
         </div>
       )}
 
+      {/* ── Category bulk-action buttons (#21) ── */}
+      {categoryGroups.length > 0 && (
+        <div className="cl-cat-actions">
+          <p className="cl-cat-actions-header">// clean by category</p>
+          <div className="cl-cat-chips">
+            {categoryGroups.map(({ cat, sds, total }) => {
+              const style = CATEGORY_COLORS[cat] ?? { bg: 'rgba(120,120,140,0.15)', color: '#888899' };
+              const emailCount = total;
+              return (
+                <button
+                  key={cat}
+                  className="cl-cat-chip"
+                  style={{ borderColor: `${style.color}60`, color: style.color, background: style.bg }}
+                  disabled={!!bulkProgress || classifying}
+                  onClick={() => setConfirmModal({
+                    label: `DELETE ALL ${cat.toUpperCase()} (${sds.length} senders)`,
+                    senders: sds,
+                    emailCount,
+                  })}
+                >
+                  {cat}
+                  <span className="cl-cat-chip-count">{sds.length} senders · {emailCount.toLocaleString()} emails</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk progress (#22) ── */}
+      {bulkProgress && (
+        <div className="cl-bulk-progress">
+          <div className="cl-bulk-progress-label">
+            <span>{bulkProgress.label}</span>
+            <span className="cl-bulk-progress-count">{bulkProgress.done} / {bulkProgress.total} senders</span>
+          </div>
+          <div className="cl-bulk-track">
+            <div
+              className="cl-bulk-fill"
+              style={{ width: `${Math.round((bulkProgress.done / bulkProgress.total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Scan results ── */}
       {scanResult && (
         <>
@@ -1725,6 +2000,35 @@ export default function CleanerPage() {
             {actionLog.map((line, i) => (
               <div key={i} className="cl-log-line">{line}</div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm modal ── */}
+      {confirmModal && (
+        <div className="cl-modal-overlay" onClick={() => setConfirmModal(null)}>
+          <div className="cl-modal" onClick={e => e.stopPropagation()}>
+            <p className="cl-modal-tag">// confirm_action</p>
+            <h2 className="cl-modal-title">{confirmModal.label}</h2>
+            <p className="cl-modal-sub">
+              This will trash {confirmModal.emailCount.toLocaleString()} emails from{' '}
+              {confirmModal.senders.length} sender{confirmModal.senders.length !== 1 ? 's' : ''}.
+              Senders with auto-unsubscribe will be unsubscribed first.
+            </p>
+            {confirmModal.senders.some(s => !s.category || s.category === 'transactional') && (
+              <div className="cl-modal-warning">
+                ⚠ Some senders may be transactional (receipts, banks, alerts). Review before confirming.
+              </div>
+            )}
+            <div className="cl-modal-actions">
+              <button className="cl-modal-cancel" onClick={() => setConfirmModal(null)}>CANCEL</button>
+              <button
+                className="cl-modal-confirm"
+                onClick={() => runCategoryClean(confirmModal.senders, confirmModal.label)}
+              >
+                CONFIRM DELETE
+              </button>
+            </div>
           </div>
         </div>
       )}
