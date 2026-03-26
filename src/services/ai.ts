@@ -34,6 +34,34 @@ export async function selectModel(): Promise<{
   }
 }
 
+export async function classifyAllSenders(
+  senders: { email: string; displayName: string }[]
+): Promise<{ email: string; category: string }[]> {
+  const BATCH = 30;
+  const results: { email: string; category: string }[] = [];
+
+  for (let i = 0; i < senders.length; i += BATCH) {
+    const batch = senders.slice(i, i + BATCH);
+    const prompt = `Classify each of these email senders into one category.
+Categories: newsletter, job_alert, promo, social, transactional, other.
+"transactional" = banks, receipts, security alerts, payment processors.
+
+Senders:
+${batch.map((s, j) => `${j + 1}. "${s.displayName}" <${s.email}>`).join('\n')}
+
+Respond ONLY with a JSON array like:
+[{"email":"...","category":"..."},...]`;
+
+    const text = await classifyWithFallback(prompt);
+    try {
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) results.push(...JSON.parse(jsonMatch[0]));
+    } catch { /* skip malformed batch */ }
+  }
+
+  return results;
+}
+
 export async function classifyWithFallback(prompt: string): Promise<string> {
   try {
     const res = await fetch(
@@ -66,7 +94,8 @@ export function buildSystemPrompt(scanContext?: ScanResult): string {
 Rules:
 - SCAN_CONTEXT is already loaded below — do NOT call scanInbox under any circumstances when scan results are present.
 - When asked to analyze or recommend: respond with a brief structured summary grouped by likely category. Infer categories from sender names — do NOT call classifySenders just to analyze.
-- Only call classifySenders when the user wants to act on a specific category and you need confirmed classifications to identify which senders belong to it. Pass ALL relevant senders from the list below.
+- When the user wants to classify senders: call classifyAllSenders (no arguments) — it handles all senders automatically. Never pass a large array to classifySenders.
+- Only use classifySenders (with explicit senders array) for a small targeted subset (max 20 senders).
 - Execute delete/unsubscribe actions immediately when asked — no extra confirmation unless the sender looks transactional.
 - Flag "transactional" senders (banks, Stripe, receipts, security alerts) as risky — warn before deleting.
 - Be concise. After each action, report what was done and how many emails were affected.`;

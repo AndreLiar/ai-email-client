@@ -140,7 +140,7 @@ export default function CleanerPage() {
       for (const part of msg.parts) {
         if (part.type !== 'tool-invocation') continue;
         const inv = (part as any).toolInvocation;
-        if (inv?.toolName === 'classifySenders' && inv?.state === 'result') {
+        if ((inv?.toolName === 'classifySenders' || inv?.toolName === 'classifyAllSenders') && inv?.state === 'result') {
           const classifications: { email: string; category: string }[] = inv.result?.classifications || [];
           if (classifications.length === 0) continue;
           setScanResult(prev => {
@@ -308,17 +308,19 @@ export default function CleanerPage() {
       .join('');
 
   const TOOL_LABELS: Record<string, string> = {
-    scanInbox:             '🔍 Scanning inbox...',
-    classifySenders:       '🏷️  Classifying senders...',
-    deleteEmailsFromSender:'🗑️  Deleting emails...',
-    unsubscribeFromSender: '✉️  Unsubscribing...',
+    scanInbox:              '🔍 Scanning inbox...',
+    classifyAllSenders:     '🏷️  Classifying all senders...',
+    classifySenders:        '🏷️  Classifying senders...',
+    deleteEmailsFromSender: '🗑️  Deleting emails...',
+    unsubscribeFromSender:  '✉️  Unsubscribing...',
   };
 
   const TOOL_DONE: Record<string, (r: any) => string> = {
-    scanInbox:             r => `✓ Scanned ${r?.totalScanned ?? 0} emails — ${r?.senders?.length ?? 0} senders found`,
-    classifySenders:       r => `✓ Classified ${r?.classifications?.length ?? 0} senders`,
-    deleteEmailsFromSender:r => `✓ Trashed ${r?.deleted ?? 0} emails from ${r?.senderEmail}`,
-    unsubscribeFromSender: r => `✓ Unsubscribed from ${r?.senderEmail} (${r?.method ?? 'none'})`,
+    scanInbox:              r => `✓ Scanned ${r?.totalScanned ?? 0} emails — ${r?.senders?.length ?? 0} senders found`,
+    classifyAllSenders:     r => `✓ Classified ${r?.classifications?.length ?? 0} senders`,
+    classifySenders:        r => `✓ Classified ${r?.classifications?.length ?? 0} senders`,
+    deleteEmailsFromSender: r => `✓ Trashed ${r?.deleted ?? 0} emails from ${r?.senderEmail}`,
+    unsubscribeFromSender:  r => `✓ Unsubscribed from ${r?.senderEmail} (${r?.method ?? 'none'})`,
   };
 
   const selectedCount = selected.size;

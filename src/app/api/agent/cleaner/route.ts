@@ -1,6 +1,6 @@
 import { getValidAccessToken } from '@/services/auth';
 import { listMessages, getMessageMetadata, trashAllFromSender, performUnsubscribe, parseFromHeader } from '@/services/gmail';
-import { selectModel, classifyWithFallback, buildSystemPrompt } from '@/services/ai';
+import { selectModel, classifyWithFallback, classifyAllSenders, buildSystemPrompt } from '@/services/ai';
 import { streamText, tool, convertToModelMessages, stepCountIs } from 'ai';
 import { z } from 'zod';
 import type { UIMessage } from 'ai';
@@ -73,11 +73,26 @@ export async function POST(req: Request) {
       },
     }),
 
-    // ── Tool 2: Classify senders ──────────────────────────────────────────
+    // ── Tool 2a: Classify ALL senders from scan context (no args — avoids large array generation) ──
+    classifyAllSenders: tool({
+      description: 'Classify ALL senders from the scan results into categories. Use this when the user asks to classify all senders or their full inbox. Takes no arguments.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const senders = (scanContext?.senders ?? []).map(s => ({
+          email: s.email,
+          displayName: s.displayName,
+        }));
+        if (senders.length === 0) return { classifications: [] };
+        const classifications = await classifyAllSenders(senders);
+        return { classifications };
+      },
+    }),
+
+    // ── Tool 2b: Classify a small subset of senders (max 20) ─────────────
     classifySenders: tool({
-      description: 'Classify a list of sender names/emails into categories: newsletter, job_alert, promo, social, transactional, other.',
+      description: 'Classify a small subset of senders (max 20) by passing them explicitly. Use classifyAllSenders instead when classifying the full list.',
       inputSchema: z.object({
-        senders: z.array(z.object({ email: z.string(), displayName: z.string() })),
+        senders: z.array(z.object({ email: z.string(), displayName: z.string() })).max(20),
       }),
       execute: async ({ senders }) => {
         const prompt = `Classify each of these email senders into one category.
@@ -91,7 +106,6 @@ Respond ONLY with a JSON array like:
 [{"email":"...","category":"..."},...]`;
 
         const text = await classifyWithFallback(prompt);
-
         try {
           const jsonMatch = text.match(/\[[\s\S]*\]/);
           return { classifications: jsonMatch ? JSON.parse(jsonMatch[0]) : [] };
