@@ -62,6 +62,7 @@ export default function CleanerPage() {
   const [chatInput, setChatInput] = useState('');
   const [page, setPage] = useState(0);
   const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
+  const [classifying, setClassifying] = useState(false);
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
   const scanTermRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
@@ -133,39 +134,39 @@ export default function CleanerPage() {
     scanTermRef.current?.scrollTo({ top: scanTermRef.current.scrollHeight, behavior: 'smooth' });
   }, [scanLines]);
 
-  // Sync agent classifications back to the sender table
-  useEffect(() => {
-    for (const msg of messages) {
-      if (msg.role !== 'assistant') continue;
-      for (const part of msg.parts) {
-        if (part.type !== 'tool-invocation') continue;
-        // AI SDK v6 uses either nested toolInvocation or flat structure
-        const p = part as any;
-        const toolName = p.toolInvocation?.toolName ?? p.toolName ?? '';
-        const state    = p.toolInvocation?.state    ?? p.state    ?? '';
-        const result   = p.toolInvocation?.result   ?? p.result   ?? null;
+  // Apply classifications to the sender table
+  const applyClassifications = (classifications: { email: string; category: string }[]) => {
+    if (!classifications.length) return;
+    setScanResult(prev => {
+      if (!prev) return prev;
+      const catMap = new Map(classifications.map(c => [c.email, c.category]));
+      return {
+        ...prev,
+        senders: prev.senders.map(s => ({
+          ...s,
+          category: catMap.get(s.email) || s.category,
+        })),
+      };
+    });
+  };
 
-        if (
-          (toolName === 'classifySenders' || toolName === 'classifyAllSenders') &&
-          state === 'result' &&
-          result?.classifications?.length > 0
-        ) {
-          const classifications: { email: string; category: string }[] = result.classifications;
-          setScanResult(prev => {
-            if (!prev) return prev;
-            const catMap = new Map(classifications.map(c => [c.email, c.category]));
-            return {
-              ...prev,
-              senders: prev.senders.map(s => ({
-                ...s,
-                category: catMap.get(s.email) || s.category,
-              })),
-            };
-          });
-        }
-      }
+  // Auto-classify all senders immediately after scan completes
+  const classifyAllAfterScan = async (senders: SenderRow[]) => {
+    setClassifying(true);
+    try {
+      const res = await fetch('/api/agent/classify-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senders }),
+      });
+      const data = await res.json();
+      if (data.classifications) applyClassifications(data.classifications);
+    } catch {
+      // Classification is best-effort — scan results still usable without it
+    } finally {
+      setClassifying(false);
     }
-  }, [messages]);
+  };
 
   // Auto-open chat and trigger proactive agent recommendation after scan completes
   useEffect(() => {
@@ -228,6 +229,7 @@ export default function CleanerPage() {
                 setPage(0);
                 log(`Scan complete — ${evt.result.senders.length} senders, ${evt.result.total.toLocaleString()} stale emails.`);
                 setPendingAutoAnalyze(true);
+                classifyAllAfterScan(evt.result.senders);
               }
             } else if (evt.phase === 'error') {
               pushLine({ text: evt.message, type: 'error' });
@@ -1274,6 +1276,12 @@ export default function CleanerPage() {
                 )}
               </div>
             ))}
+            {classifying && (
+              <div className="cl-term-line">
+                <span className="cl-term-arrow">↳</span>
+                <span className="cl-term-info">Classifying senders with AI...</span>
+              </div>
+            )}
             {scanning && (
               <div className="cl-term-line">
                 <span className="cl-term-arrow" style={{ opacity: 0 }}>↳</span>
