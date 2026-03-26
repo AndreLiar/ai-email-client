@@ -64,21 +64,27 @@ export function buildSystemPrompt(scanContext?: ScanResult): string {
   let prompt = `You are an Inbox Cleaner Agent. Your job is to help users clean their Gmail inbox.
 
 Rules:
-- If scan results are provided below, use them directly — do NOT call scanInbox again.
-- Classify senders using classifySenders before taking action if categories are unknown.
-- Execute delete/unsubscribe actions immediately when the user asks — do not ask for extra confirmation unless the sender looks transactional.
-- Flag "transactional" senders (banks, Stripe, receipts) as risky — warn before deleting.
+- SCAN_CONTEXT is already loaded below — do NOT call scanInbox under any circumstances when scan results are present.
+- When asked to analyze or recommend: respond with a brief structured summary grouped by likely category. Infer categories from sender names — do NOT call classifySenders just to analyze.
+- Only call classifySenders when the user wants to act on a specific category and you need confirmed classifications to identify which senders belong to it. Pass ALL relevant senders from the list below.
+- Execute delete/unsubscribe actions immediately when asked — no extra confirmation unless the sender looks transactional.
+- Flag "transactional" senders (banks, Stripe, receipts, security alerts) as risky — warn before deleting.
 - Be concise. After each action, report what was done and how many emails were affected.`;
 
   if (scanContext && scanContext.senders.length > 0) {
-    const topSenders = scanContext.senders.slice(0, 40);
-    prompt += `\n\n## SCAN RESULTS (already available — do NOT call scanInbox)\n`;
-    prompt += `Total stale unread emails: ${scanContext.total}. Total senders found: ${scanContext.senders.length} (showing top ${topSenders.length}).\n`;
-    prompt += `Senders (sorted by email count):\n`;
-    for (const s of topSenders) {
-      prompt += `- "${s.displayName}" <${s.email}>: ${s.count} emails, autoUnsub: ${s.canAutoUnsubscribe}\n`;
+    const senders = scanContext.senders;
+    const autoUnsubCount = senders.filter(s => s.canAutoUnsubscribe).length;
+
+    prompt += `\n\n## SCAN_CONTEXT — ${senders.length} senders, ${scanContext.total.toLocaleString()} stale unread emails`;
+    prompt += `\nAuto-unsubscribable: ${autoUnsubCount} of ${senders.length} senders`;
+    prompt += `\n\nFull sender list (name <email>: count [AUTO] if one-click unsubscribe supported):\n`;
+
+    for (const s of senders) {
+      const auto = s.canAutoUnsubscribe ? ' [AUTO]' : '';
+      prompt += `- "${s.displayName}" <${s.email}>: ${s.count}${auto}\n`;
     }
-    prompt += `\nWhen the user asks to delete/unsubscribe by category, call classifySenders first (pass ALL listed senders) to identify which belong to that category, then act on them.`;
+
+    prompt += `\nIMPORTANT: All ${senders.length} senders above are available. When acting on a category, classify and act on ALL matching senders — not just a subset.`;
   }
 
   return prompt;

@@ -26,25 +26,17 @@ export async function POST(req: Request) {
   const tools = {
     // ── Tool 1: Scan inbox ────────────────────────────────────────────────
     scanInbox: tool({
-      description: 'Scan the inbox and return a grouped list of senders with email counts and unsubscribe capability.',
+      description: 'Scan the inbox for stale unread emails. Only call this if no scan results were provided in the system prompt.',
       inputSchema: z.object({}),
       execute: async () => {
-        const [promoRes, updatesRes, inboxRes] = await Promise.all([
-          listMessages(accessToken, 'category:promotions', 100),
-          listMessages(accessToken, 'category:updates', 100),
-          listMessages(accessToken, 'in:inbox is:unread', 100),
-        ]);
-
-        const allMessages = [
-          ...(promoRes.messages || []),
-          ...(updatesRes.messages || []),
-          ...(inboxRes.messages || []),
-        ];
-        const unique = Array.from(new Map(allMessages.map(m => [m.id, m])).values());
+        // Uses the same query as the main scan endpoint for consistency
+        const data = await listMessages(accessToken, 'is:unread older_than:180d', 500);
+        const ids = (data.messages || []).map(m => m.id);
 
         const metadataList = await Promise.all(
-          unique.map(msg =>
-            getMessageMetadata(accessToken, msg.id, ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post'])
+          ids.map(id =>
+            getMessageMetadata(accessToken, id, ['From', 'List-Unsubscribe', 'List-Unsubscribe-Post'])
+              .catch(() => null)
           )
         );
 
@@ -54,7 +46,7 @@ export async function POST(req: Request) {
         }>();
 
         for (const msg of metadataList) {
-          if (!msg.payload?.headers) continue;
+          if (!msg?.payload?.headers) continue;
           const headers = msg.payload.headers;
           const fromHeader = headers.find(h => h.name === 'From')?.value || '';
           const listUnsub = headers.find(h => h.name === 'List-Unsubscribe')?.value || '';
@@ -76,7 +68,7 @@ export async function POST(req: Request) {
 
         return {
           senders: Array.from(senderMap.values()).sort((a, b) => b.count - a.count),
-          totalScanned: unique.length,
+          totalScanned: ids.length,
         };
       },
     }),

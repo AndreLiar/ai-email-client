@@ -61,6 +61,7 @@ export default function CleanerPage() {
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [page, setPage] = useState(0);
+  const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
   const scanTermRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
@@ -89,7 +90,8 @@ export default function CleanerPage() {
           scanContext: ctx
             ? {
                 total: ctx.total,
-                senders: ctx.senders.slice(0, 50).map(s => ({
+                // Send ALL senders — no cap
+                senders: ctx.senders.map(s => ({
                   displayName: s.displayName,
                   email: s.email,
                   count: s.count,
@@ -130,6 +132,41 @@ export default function CleanerPage() {
   useEffect(() => {
     scanTermRef.current?.scrollTo({ top: scanTermRef.current.scrollHeight, behavior: 'smooth' });
   }, [scanLines]);
+
+  // Sync agent classifications back to the sender table
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.role !== 'assistant') continue;
+      for (const part of msg.parts) {
+        if (part.type !== 'tool-invocation') continue;
+        const inv = (part as any).toolInvocation;
+        if (inv?.toolName === 'classifySenders' && inv?.state === 'result') {
+          const classifications: { email: string; category: string }[] = inv.result?.classifications || [];
+          if (classifications.length === 0) continue;
+          setScanResult(prev => {
+            if (!prev) return prev;
+            const catMap = new Map(classifications.map((c: any) => [c.email, c.category]));
+            return {
+              ...prev,
+              senders: prev.senders.map(s => ({
+                ...s,
+                category: catMap.get(s.email) || s.category,
+              })),
+            };
+          });
+        }
+      }
+    }
+  }, [messages]);
+
+  // Auto-open chat and trigger proactive agent recommendation after scan completes
+  useEffect(() => {
+    if (pendingAutoAnalyze && scanResult && status === 'ready') {
+      setPendingAutoAnalyze(false);
+      setShowChat(true);
+      sendMessage({ text: 'Analyze my inbox results and give me a brief plan to clean it.' });
+    }
+  }, [pendingAutoAnalyze, scanResult, status]);
 
   const pushLine = (line: ScanLine) =>
     setScanLines(prev => {
@@ -182,6 +219,7 @@ export default function CleanerPage() {
                 setScanResult(evt.result);
                 setPage(0);
                 log(`Scan complete — ${evt.result.senders.length} senders, ${evt.result.total.toLocaleString()} stale emails.`);
+                setPendingAutoAnalyze(true);
               }
             } else if (evt.phase === 'error') {
               pushLine({ text: evt.message, type: 'error' });
