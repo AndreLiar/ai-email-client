@@ -139,13 +139,21 @@ export default function CleanerPage() {
       if (msg.role !== 'assistant') continue;
       for (const part of msg.parts) {
         if (part.type !== 'tool-invocation') continue;
-        const inv = (part as any).toolInvocation;
-        if ((inv?.toolName === 'classifySenders' || inv?.toolName === 'classifyAllSenders') && inv?.state === 'result') {
-          const classifications: { email: string; category: string }[] = inv.result?.classifications || [];
-          if (classifications.length === 0) continue;
+        // AI SDK v6 uses either nested toolInvocation or flat structure
+        const p = part as any;
+        const toolName = p.toolInvocation?.toolName ?? p.toolName ?? '';
+        const state    = p.toolInvocation?.state    ?? p.state    ?? '';
+        const result   = p.toolInvocation?.result   ?? p.result   ?? null;
+
+        if (
+          (toolName === 'classifySenders' || toolName === 'classifyAllSenders') &&
+          state === 'result' &&
+          result?.classifications?.length > 0
+        ) {
+          const classifications: { email: string; category: string }[] = result.classifications;
           setScanResult(prev => {
             if (!prev) return prev;
-            const catMap = new Map(classifications.map((c: any) => [c.email, c.category]));
+            const catMap = new Map(classifications.map(c => [c.email, c.category]));
             return {
               ...prev,
               senders: prev.senders.map(s => ({
