@@ -286,6 +286,17 @@ export default function CleanerPage() {
       const data = await res.json();
       setStatus(email, 'done');
       log(`✕ Trashed ${data.deleted} email(s) from ${email}`);
+      // Remove from list immediately — category chips auto-update via derived state
+      setScanResult(prev => {
+        if (!prev) return prev;
+        const removed = prev.senders.find(s => s.email === email);
+        return {
+          ...prev,
+          senders: prev.senders.filter(s => s.email !== email),
+          total: removed ? Math.max(0, prev.total - removed.count) : prev.total,
+        };
+      });
+      setSelected(prev => { const next = new Set(prev); next.delete(email); return next; });
     } catch {
       setStatus(email, 'error');
       log(`✕ Failed to delete emails from ${email}`);
