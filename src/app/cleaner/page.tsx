@@ -72,6 +72,7 @@ export default function CleanerPage() {
   const [bulkProgress, setBulkProgress] = useState<{
     label: string; done: number; total: number;
   } | null>(null);
+  const [summaryDismissed, setSummaryDismissed] = useState(false);
   const scanTermRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
@@ -201,6 +202,7 @@ export default function CleanerPage() {
     setSelected(new Set());
     setSenderStatuses({});
     setActionLog([]);
+    setSummaryDismissed(false);
 
     try {
       const res = await fetch('/api/agent/scan-senders');
@@ -412,11 +414,32 @@ export default function CleanerPage() {
       .sort((a, b) => b.total - a.total);
   }, [scanResult]);
 
+  // Cleanup priority score per sender: volume × 2 + staleness bonus
+  const priorityScore = (s: SenderRow) =>
+    s.count * 2 + Math.min(Math.floor(monthsAgo(s.oldestDate) / 3), 20);
+
+  // Sorted senders for table (by priority score desc)
+  const sortedSenders = useMemo(() =>
+    scanResult
+      ? [...scanResult.senders].sort((a, b) => priorityScore(b) - priorityScore(a))
+      : [],
+  [scanResult]);
+
+  // Smart summary (#23): computed from classification data
+  const smartSummary = useMemo(() => {
+    if (!scanResult || categoryGroups.length === 0) return null;
+    const total = categoryGroups.reduce((n, g) => n + g.total, 0);
+    const cleanable = categoryGroups
+      .filter(g => g.cat !== 'transactional')
+      .reduce((n, g) => n + g.total, 0);
+    const topCat = categoryGroups[0];
+    const autoCount = scanResult.senders.filter(s => s.canAutoUnsubscribe).length;
+    return { total, cleanable, topCat, autoCount, groups: categoryGroups };
+  }, [categoryGroups, scanResult]);
+
   // Pagination
-  const totalPages = scanResult ? Math.ceil(scanResult.senders.length / PAGE_SIZE) : 0;
-  const pagedSenders = scanResult
-    ? scanResult.senders.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
-    : [];
+  const totalPages = Math.ceil(sortedSenders.length / PAGE_SIZE);
+  const pagedSenders = sortedSenders.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   async function handleDisconnect() {
     await fetch('/api/auth/disconnect', { method: 'POST' });
@@ -1277,6 +1300,116 @@ export default function CleanerPage() {
         }
         .cl-empty-hint em { color: #4a6a54; font-style: normal; }
 
+        /* ── smart summary (#23) ── */
+        .cl-summary {
+          background: #0b1018;
+          border: 1px solid rgba(0,217,126,0.18);
+          margin-bottom: 1.75rem;
+          overflow: hidden;
+          position: relative;
+        }
+        .cl-summary::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(ellipse 60% 40% at 100% 0%, rgba(0,217,126,0.04) 0%, transparent 70%);
+          pointer-events: none;
+        }
+        .cl-summary-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.65rem 1.25rem;
+          background: #0f1a20;
+          border-bottom: 1px solid rgba(0,217,126,0.1);
+        }
+        .cl-summary-tag {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.15em;
+          color: #00d97e;
+          text-transform: uppercase;
+        }
+        .cl-summary-dismiss {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.58rem;
+          color: #2a4a34;
+          background: none;
+          border: none;
+          cursor: pointer;
+          letter-spacing: 0.06em;
+          transition: color 0.15s;
+        }
+        .cl-summary-dismiss:hover { color: #4a6a54; }
+        .cl-summary-body {
+          padding: 1.25rem 1.5rem;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 1.5rem;
+        }
+        @media (max-width: 680px) { .cl-summary-body { grid-template-columns: 1fr; } }
+        .cl-summary-headline {
+          font-size: 1rem;
+          font-weight: 700;
+          color: #f0f7f2;
+          letter-spacing: -0.01em;
+          margin-bottom: 0.4rem;
+          line-height: 1.4;
+        }
+        .cl-summary-headline em { color: #00d97e; font-style: normal; }
+        .cl-summary-sub {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.65rem;
+          color: #4a6a54;
+          line-height: 1.7;
+        }
+        .cl-summary-sub strong { color: #c8d8cc; }
+        .cl-summary-cat-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
+        }
+        .cl-summary-cat-row {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+        }
+        .cl-summary-cat-name {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.62rem;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          width: 90px;
+          flex-shrink: 0;
+        }
+        .cl-summary-track {
+          flex: 1;
+          height: 5px;
+          background: rgba(0,217,126,0.06);
+          overflow: hidden;
+        }
+        .cl-summary-fill { height: 100%; transition: width 0.5s ease; }
+        .cl-summary-cat-count {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          color: #4a6a54;
+          min-width: 52px;
+          text-align: right;
+          flex-shrink: 0;
+        }
+
+        /* ── priority score (#20) ── */
+        .cl-priority-dot {
+          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block;
+        }
+        .cl-priority-cell {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.62rem;
+        }
+
         /* ── category bulk actions ── */
         .cl-cat-actions {
           margin-bottom: 1.5rem;
@@ -1776,6 +1909,51 @@ export default function CleanerPage() {
         </div>
       )}
 
+      {/* ── Smart Scan Summary (#23) ── */}
+      {smartSummary && !summaryDismissed && !classifying && (
+        <div className="cl-summary">
+          <div className="cl-summary-bar">
+            <span className="cl-summary-tag">// smart_summary</span>
+            <button className="cl-summary-dismiss" onClick={() => setSummaryDismissed(true)}>DISMISS ×</button>
+          </div>
+          <div className="cl-summary-body">
+            <div>
+              <p className="cl-summary-headline">
+                <em>{smartSummary.cleanable.toLocaleString()}</em> emails you can safely delete
+              </p>
+              <p className="cl-summary-sub">
+                Out of {smartSummary.total.toLocaleString()} classified emails,{' '}
+                <strong>{smartSummary.cleanable.toLocaleString()}</strong> are non-transactional
+                ({smartSummary.groups.filter(g => g.cat !== 'transactional').length} categories).<br />
+                <strong>{smartSummary.autoCount}</strong> sender{smartSummary.autoCount !== 1 ? 's' : ''} support
+                one-click unsubscribe — use ⚡ UNSUB ALL AUTO to handle them in one shot.<br />
+                Top offender: <strong>{smartSummary.topCat.cat}</strong> with {smartSummary.topCat.total.toLocaleString()} emails
+                from {smartSummary.topCat.sds.length} sender{smartSummary.topCat.sds.length !== 1 ? 's' : ''}.
+              </p>
+            </div>
+            <div>
+              <div className="cl-summary-cat-list">
+                {smartSummary.groups.map(({ cat, total, sds }) => {
+                  const style = CATEGORY_COLORS[cat] ?? { bg: 'rgba(120,120,140,0.15)', color: '#888899' };
+                  const pct = smartSummary.total > 0
+                    ? Math.round((total / smartSummary.total) * 100)
+                    : 0;
+                  return (
+                    <div key={cat} className="cl-summary-cat-row">
+                      <span className="cl-summary-cat-name" style={{ color: style.color }}>{cat}</span>
+                      <div className="cl-summary-track">
+                        <div className="cl-summary-fill" style={{ width: `${pct}%`, background: style.color }} />
+                      </div>
+                      <span className="cl-summary-cat-count">{total.toLocaleString()} ({sds.length})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Category bulk-action buttons (#21) ── */}
       {categoryGroups.length > 0 && (
         <div className="cl-cat-actions">
@@ -1862,6 +2040,7 @@ export default function CleanerPage() {
                   </th>
                   <th>Sender</th>
                   <th style={{ width: 80 }}>Unread</th>
+                  <th style={{ width: 90 }}>Priority</th>
                   <th style={{ width: 110 }}>Oldest</th>
                   <th style={{ width: 130 }}>Category</th>
                   <th style={{ width: 90 }}>Unsub</th>
@@ -1892,6 +2071,21 @@ export default function CleanerPage() {
                       </td>
                       <td>
                         <span className="cl-count-badge">{sender.count}</span>
+                      </td>
+                      <td>
+                        {(() => {
+                          const score = priorityScore(sender);
+                          const [dot, label] =
+                            score >= 30 ? ['#ff5f57', 'HIGH'] :
+                            score >= 14 ? ['#ffbd2e', 'MED'] :
+                                          ['#4a6a54', 'LOW'];
+                          return (
+                            <div className="cl-priority-cell">
+                              <span className="cl-priority-dot" style={{ background: dot }} />
+                              <span style={{ color: dot, letterSpacing: '0.06em' }}>{label}</span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
                         {sender.oldestDate ? (
