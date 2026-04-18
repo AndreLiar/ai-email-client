@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -815,7 +817,7 @@ export default function CleanerPage() {
                 Finish cleaning your inbox
               </p>
               <p style={{ margin: '0 0 4px 0', fontSize: 14 }}>
-                You've already cleaned part of your inbox. Upgrade to apply all remaining actions in one click.
+                {upgradeMessage}
               </p>
               {upgradeRemainingCount > 0 && (
                 <p style={{ margin: '0 0 8px 0', fontSize: 13, opacity: 0.85 }}>
