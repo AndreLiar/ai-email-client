@@ -581,7 +581,7 @@ export default function LandingPage() {
       <div className="lp-root">
         {/* ── Nav ── */}
         <nav className="lp-nav">
-          <a href="/" className="lp-logo">clean<span>inbox</span>.ai</a>
+          <Link href="/" className="lp-logo">clean<span>inbox</span>.ai</Link>
           <Link href="/cleaner" className="lp-nav-cta">LAUNCH APP →</Link>
         </nav>
 
