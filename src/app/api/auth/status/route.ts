@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { isGmailConnected } from '@/services/auth';
+import { isUserSubscribed } from '@/services/subscription';
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ connected: false });
-  const connected = await isGmailConnected(userId);
-  return NextResponse.json({ connected });
+  try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ connected: false, subscribed: false });
+    const [connected, subscribed] = await Promise.all([
+      isGmailConnected(userId),
+      isUserSubscribed(userId),
+    ]);
+    return NextResponse.json({ connected, subscribed });
+  } catch {
+    return NextResponse.json({ connected: false, subscribed: false });
+  }
 }

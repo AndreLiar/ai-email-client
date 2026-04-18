@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   ],
 
   serverExternalPackages: [],
+
+  transpilePackages: ['@clerk/nextjs', '@clerk/react', '@clerk/shared'],
 };
 
 export default nextConfig;

@@ -17,7 +17,7 @@ export default function ConnectGmail() {
         <div className={styles.perms}>
           <span className={styles.permItem}>Read and modify emails</span>
           <span className={styles.permItem}>Send unsubscribe requests</span>
-          <span className={styles.permItem}>Tokens stored in HTTP-only cookies</span>
+          <span className={styles.permItem}>Tokens stored securely in our database</span>
         </div>
       </div>
     </div>

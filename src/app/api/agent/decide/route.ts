@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       summary: batch.summary,
       scoring: batch.scoring,
       decisions: decisionsWithIds,
+      dropped: batch.dropped ?? 0,
       createdAt: Date.now(),
     });
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
-import { stripe } from '@/services/stripe';
+import { getStripe } from '@/services/stripe';
 import { markUserSubscribed } from '@/services/subscription';
 import { isEventProcessed, markEventProcessed } from '@/services/storage';
 
@@ -14,6 +14,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
+    const stripe = getStripe();
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);

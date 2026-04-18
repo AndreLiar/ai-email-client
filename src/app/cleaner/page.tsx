@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 
 import type { SenderRow, ScanResult, SenderStatus, ScanLine } from './types';
@@ -82,6 +82,7 @@ const FREE_APPLY_LIMIT = 50;
 
 export default function CleanerPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, userId } = useAuth();
 
   // ── Auth ─────────────────────────────────────────────────────────
@@ -93,7 +94,37 @@ export default function CleanerPage() {
 
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
   useEffect(() => {
-    fetch('/api/auth/status').then(r => r.json()).then(d => setGmailConnected(d.connected));
+    fetch('/api/auth/status')
+      .then(r => r.ok ? r.json() : { connected: false, subscribed: false })
+      .then(d => setGmailConnected(d.connected))
+      .catch(() => setGmailConnected(false));
+  }, []);
+
+  // Poll for subscription activation after Stripe redirect
+  useEffect(() => {
+    if (searchParams.get('success') !== 'true') return;
+    setPaymentPending(true);
+    router.replace('/cleaner', { scroll: false });
+    const deadline = Date.now() + 30_000;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = res.ok ? await res.json() : {};
+        if (data.subscribed) {
+          setPaymentPending(false);
+          setNeedsUpgrade(false);
+          clearInterval(interval);
+        } else if (Date.now() > deadline) {
+          setPaymentPending(false);
+          clearInterval(interval);
+        }
+      } catch {
+        clearInterval(interval);
+        setPaymentPending(false);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!gmailConnected) return;
@@ -119,6 +150,7 @@ export default function CleanerPage() {
   const [upgradeMessage, setUpgradeMessage] = useState('Unlock bulk cleanup to apply all actions in one click');
   const [upgradeRemainingCount, setUpgradeRemainingCount] = useState(0);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [paymentPending, setPaymentPending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyRecords, setHistoryRecords] = useState<HistoryRecordData[]>([]);
@@ -370,7 +402,7 @@ export default function CleanerPage() {
     }
     if (safeSelectedDecisionIds.length > FREE_APPLY_LIMIT) {
       setNeedsUpgrade(true);
-      setUpgradeMessage('Free plan allows up to 50 emails. Upgrade to clean everything at once.');
+      setUpgradeMessage('Free plan allows up to 50 actions. Upgrade to clean everything at once.');
       setUpgradeRemainingCount(safeSelectedDecisionIds.length - FREE_APPLY_LIMIT);
       track('upgrade_shown', {
         reason: 'quota',
@@ -767,14 +799,29 @@ export default function CleanerPage() {
             <p style={{ margin: 0 }}>Nothing is deleted without your approval</p>
             <p style={{ margin: '4px 0 0 0' }}>You can review every action before applying</p>
           </div>
-          {needsUpgrade && (
+          {paymentPending && (
+            <div style={{ marginTop: 8, marginBottom: 8, padding: '10px 14px', background: 'rgba(80,200,120,0.12)', border: '1px solid #50c878', borderRadius: 6 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                ⏳ Payment processing — activating your subscription...
+              </p>
+              <p style={{ margin: '4px 0 0 0', fontSize: 13, opacity: 0.85 }}>
+                This usually takes a few seconds. You'll be unlocked automatically.
+              </p>
+            </div>
+          )}
+          {needsUpgrade && !paymentPending && (
             <div style={{ marginTop: 8, marginBottom: 8 }}>
               <p style={{ margin: '0 0 8px 0', fontSize: 16, fontWeight: 700 }}>
                 Finish cleaning your inbox
               </p>
-              <p style={{ margin: '0 0 8px 0', fontSize: 14 }}>
+              <p style={{ margin: '0 0 4px 0', fontSize: 14 }}>
                 You've already cleaned part of your inbox. Upgrade to apply all remaining actions in one click.
               </p>
+              {upgradeRemainingCount > 0 && (
+                <p style={{ margin: '0 0 8px 0', fontSize: 13, opacity: 0.85 }}>
+                  {upgradeRemainingCount} action{upgradeRemainingCount !== 1 ? 's' : ''} still pending
+                </p>
+              )}
               <button
                 className={styles.btnPrimary}
                 onClick={startCheckoutUpgrade}

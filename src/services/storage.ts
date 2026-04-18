@@ -17,6 +17,7 @@ export interface DecisionPreviewRecord {
   summary: DecisionSummary;
   scoring: DecisionScoring;
   decisions: Array<EmailDecision & { decisionId?: string }>;
+  dropped?: number;
   createdAt: number;
 }
 
@@ -135,7 +136,7 @@ export async function saveDecisionPreview(record: DecisionPreviewRecord): Promis
     summary: record.summary,
     scoring: record.scoring,
     decisions: record.decisions,
-    droppedCount: 0,
+    droppedCount: record.dropped ?? 0,
     createdAt: new Date(record.createdAt),
   });
 }

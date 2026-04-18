@@ -4,7 +4,8 @@ import { auth } from '@clerk/nextjs/server';
 import { getValidAccessToken } from '@/services/auth';
 import { executeDecisions } from '@/services/decisionEngine';
 import { validateAndGetDecisions } from '@/services/decisionPreviewStore';
-import { saveDecisionExecution } from '@/services/storage';
+import { saveDecisionExecution, getDecisionPreview } from '@/services/storage';
+import type { EmailDecision } from '@/types/agent';
 import { isUserSubscribed } from '@/services/subscription';
 
 const MAX_SELECTED_DECISIONS = 100;
@@ -67,11 +68,38 @@ export async function POST(req: NextRequest) {
     }
 
     const accessToken = await getValidAccessToken(userId);
-    const validatedDecisions = validateAndGetDecisions(
-      parsed.data.previewId,
-      dedupedSelectedDecisionIds,
-      userId
-    );
+
+    let validatedDecisions: EmailDecision[];
+    try {
+      validatedDecisions = validateAndGetDecisions(
+        parsed.data.previewId,
+        dedupedSelectedDecisionIds,
+        userId
+      );
+    } catch (inMemoryErr: any) {
+      if (!inMemoryErr?.message?.includes('Invalid or expired previewId')) throw inMemoryErr;
+      // In-memory session expired — fall back to DB
+      const stored = await getDecisionPreview(parsed.data.previewId);
+      if (!stored) throw inMemoryErr;
+      if (stored.userId !== userId) {
+        return NextResponse.json({ error: 'Preview session does not belong to this user.' }, { status: 403 });
+      }
+      const storedById = new Map(
+        (stored.decisions as Array<EmailDecision & { decisionId?: string }>)
+          .filter(d => d.decisionId)
+          .map(d => [d.decisionId!, d])
+      );
+      const seen = new Set<string>();
+      validatedDecisions = [];
+      for (const id of dedupedSelectedDecisionIds) {
+        if (seen.has(id)) return NextResponse.json({ error: `Duplicate decision ID: ${id}` }, { status: 400 });
+        seen.add(id);
+        const d = storedById.get(id);
+        if (!d) return NextResponse.json({ error: `Unknown decision ID for preview: ${id}` }, { status: 400 });
+        const { decisionId: _id, ...decision } = d;
+        validatedDecisions.push(decision);
+      }
+    }
 
     const result = await executeDecisions({
       accessToken,

@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { stripe } from '@/services/stripe';
-
-const PLACEHOLDER_PRICE_ID = 'price_placeholder_monthly';
+import { getStripe } from '@/services/stripe';
 
 export async function POST() {
   try {
@@ -11,17 +9,20 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const priceId = process.env.STRIPE_PRICE_ID;
+    if (!priceId) {
+      return NextResponse.json({ error: 'Stripe price not configured' }, { status: 500 });
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const stripe = getStripe();
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      line_items: [
-        {
-          price: PLACEHOLDER_PRICE_ID,
-          quantity: 1,
-        },
-      ],
+      line_items: [{ price: priceId, quantity: 1 }],
       metadata: { userId },
-      success_url: 'http://localhost:3000/cleaner?success=true',
-      cancel_url: 'http://localhost:3000/cleaner?canceled=true',
+      success_url: `${appUrl}/cleaner?success=true`,
+      cancel_url: `${appUrl}/cleaner?canceled=true`,
     });
 
     if (!session.url) {
