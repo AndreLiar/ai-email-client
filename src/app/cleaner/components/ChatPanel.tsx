@@ -118,6 +118,11 @@ export default function ChatPanel({
             <span>AGENT IS WORKING</span>
           </div>
         )}
+        {status === 'error' && (
+          <div style={{ padding: '8px 12px', marginTop: 8, fontSize: 13, color: '#ff6b6b', border: '1px solid rgba(255,107,107,0.3)', borderRadius: 6 }}>
+            Agent connection lost. Please refresh the page or try again.
+          </div>
+        )}
       </div>
 
       <div className={styles.chatFooter}>

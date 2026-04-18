@@ -48,7 +48,7 @@ export async function GET() {
         } while (pageToken && ids.length < 5000);
 
         if (ids.length === 0) {
-          send({ phase: 'done', message: 'No stale unread emails found. Your inbox is clean!', result: { senders: [], total: 0 } });
+          send({ phase: 'done', message: 'No stale unread emails found. Your inbox is clean!', result: { senders: [], total: 0, scanned: 0 } });
           controller.close();
           return;
         }
@@ -120,12 +120,19 @@ export async function GET() {
         send({
           phase: 'done',
           message: `Done. ${senders.length} repetitive senders identified across ${ids.length.toLocaleString()} stale emails.`,
-          result: { senders, total: ids.length },
+          result: { senders, total: ids.length, scanned: ids.length },
         });
 
         controller.close();
       } catch (err: any) {
-        send({ phase: 'error', message: `Error: ${err.message}` });
+        const isReconnect = err?.message?.includes('RECONNECT_REQUIRED');
+        send({
+          phase: 'error',
+          message: isReconnect
+            ? 'Gmail connection lost. Please reconnect your Gmail account.'
+            : `Error: ${err.message}`,
+          reconnect: isReconnect,
+        });
         controller.close();
       }
     },

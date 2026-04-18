@@ -14,7 +14,10 @@ export async function POST(req: NextRequest) {
     const deleted = await trashAllFromSender(accessToken, senderEmail);
     return NextResponse.json({ deleted, senderEmail });
   } catch (err: any) {
+    if (err?.message?.includes('RECONNECT_REQUIRED')) {
+      return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
+    }
     console.error('❌ Bulk delete error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete emails' }, { status: 500 });
   }
 }

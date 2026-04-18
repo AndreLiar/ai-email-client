@@ -138,8 +138,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
 
-    if (err?.message?.includes('Gmail not connected')) {
-      return NextResponse.json({ error: 'Gmail not connected' }, { status: 403 });
+    if (err?.message?.includes('RECONNECT_REQUIRED')) {
+      return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
     }
 
     console.error('[execute-decisions] error:', err?.message || err);

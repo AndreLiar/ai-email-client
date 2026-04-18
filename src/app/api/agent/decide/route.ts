@@ -6,8 +6,10 @@ import { runDecisionEngine } from '@/services/decisionEngine';
 import { createPreviewSession } from '@/services/decisionPreviewStore';
 import { saveDecisionPreview } from '@/services/storage';
 
+const ALLOWED_QUERY_PATTERN = /^[a-zA-Z0-9:_\-\s.@]+$/;
+
 const requestSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().min(1).max(200).regex(ALLOWED_QUERY_PATTERN, 'Query contains disallowed characters'),
   limit: z.number().int().positive().max(500).optional(),
 });
 
@@ -62,8 +64,8 @@ export async function POST(req: NextRequest) {
       decisions: decisionsWithIds,
     });
   } catch (err: any) {
-    if (err?.message?.includes('Gmail not connected')) {
-      return NextResponse.json({ error: 'Gmail not connected' }, { status: 403 });
+    if (err?.message?.includes('RECONNECT_REQUIRED')) {
+      return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
     }
 
     console.error('[decide] error:', err?.message || err);

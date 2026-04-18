@@ -12,7 +12,7 @@ export async function getValidAccessToken(userId: string): Promise<string> {
   let accessToken = tokenRecord?.accessToken;
   const refreshToken = tokenRecord?.refreshToken;
 
-  if (!accessToken) throw new Error('Gmail not connected');
+  if (!accessToken) throw new Error('RECONNECT_REQUIRED: Gmail not connected');
 
   const testRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -20,7 +20,7 @@ export async function getValidAccessToken(userId: string): Promise<string> {
 
   if (testRes.status !== 401) return accessToken;
 
-  if (!refreshToken) throw new Error('Gmail token expired. Please reconnect.');
+  if (!refreshToken) throw new Error('RECONNECT_REQUIRED: Gmail token expired. Please reconnect your Gmail account.');
 
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -34,7 +34,7 @@ export async function getValidAccessToken(userId: string): Promise<string> {
   });
 
   const newTokens = await tokenRes.json();
-  if (!newTokens.access_token) throw new Error('Failed to refresh Gmail token. Please reconnect.');
+  if (!newTokens.access_token) throw new Error('RECONNECT_REQUIRED: Failed to refresh Gmail token. Please reconnect your Gmail account.');
 
   await saveGmailTokens(userId, {
     accessToken: newTokens.access_token,

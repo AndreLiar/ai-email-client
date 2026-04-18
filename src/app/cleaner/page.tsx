@@ -96,33 +96,56 @@ export default function CleanerPage() {
 
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
   useEffect(() => {
+    if (!userId) return;
+    setGmailConnected(null);
+    setScanResult(null);
+    setDecisionPreview(null);
+    setExecutionResult(null);
+    setSelectedDecisionIds(new Set());
     fetch('/api/auth/status')
       .then(r => r.ok ? r.json() : { connected: false, subscribed: false })
       .then(d => setGmailConnected(d.connected))
       .catch(() => setGmailConnected(false));
-  }, []);
+  }, [userId]);
+
+  const [paymentCheckAgain, setPaymentCheckAgain] = useState(false);
+
+  const checkSubscriptionNow = async () => {
+    try {
+      const res = await fetch('/api/auth/status');
+      const data = res.ok ? await res.json() : {};
+      if (data.subscribed) {
+        setPaymentPending(false);
+        setPaymentCheckAgain(false);
+        setNeedsUpgrade(false);
+      }
+    } catch { /* silent */ }
+  };
 
   // Poll for subscription activation after Stripe redirect
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('success') !== 'true') return;
     setPaymentPending(true);
     router.replace('/cleaner', { scroll: false });
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 60_000;
     const interval = setInterval(async () => {
       try {
         const res = await fetch('/api/auth/status');
         const data = res.ok ? await res.json() : {};
         if (data.subscribed) {
           setPaymentPending(false);
+          setPaymentCheckAgain(false);
           setNeedsUpgrade(false);
           clearInterval(interval);
         } else if (Date.now() > deadline) {
           setPaymentPending(false);
+          setPaymentCheckAgain(true);
           clearInterval(interval);
         }
       } catch {
         clearInterval(interval);
         setPaymentPending(false);
+        setPaymentCheckAgain(true);
       }
     }, 2000);
     return () => clearInterval(interval);
@@ -140,6 +163,7 @@ export default function CleanerPage() {
   const [scanning, setScanning] = useState(false);
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
   const [classifying, setClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState(false);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
   const [decisionPreview, setDecisionPreview] = useState<DecisionPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -292,6 +316,7 @@ export default function CleanerPage() {
             } else if (evt.phase === 'error') {
               pushLine({ text: evt.message, type: 'error' });
               log(`Scan error: ${evt.message}`);
+              if (evt.reconnect) setGmailConnected(false);
             }
           } catch { /* malformed event */ }
         }
@@ -308,6 +333,7 @@ export default function CleanerPage() {
     decision.decisionId || decision.messageId;
 
   const isEligibleDecision = (decision: DecisionPreviewDecision): boolean => {
+    if (isBlockedReason(decision.reason) || isErrorReason(decision.reason)) return false;
     if (decision.action === 'delete') return decision.confidence >= 0.9;
     if (decision.action === 'archive') return decision.confidence >= 0.75;
     return false;
@@ -349,7 +375,10 @@ export default function CleanerPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to preview decisions.');
+      if (!res.ok) {
+        if (data?.reconnect) setGmailConnected(false);
+        throw new Error(data?.error || 'Failed to preview decisions.');
+      }
 
       setDecisionPreview(data);
       const autoSelected = new Set<string>(
@@ -359,7 +388,7 @@ export default function CleanerPage() {
           .filter((id: string): id is string => Boolean(id))
       );
       setSelectedDecisionIds(autoSelected);
-      log(`Decision preview ready — ${data.decisions?.length ?? 0} decisions.`);
+      log(`Decision preview ready — ${data.decisions?.length ?? 0} decisions, ${autoSelected.size} auto-selected.`);
     } catch (err: any) {
       const message = err?.message || 'Failed to preview decisions.';
       setPreviewError(message);
@@ -389,6 +418,7 @@ export default function CleanerPage() {
   }, [decisionPreview]);
 
   const applySelectedDecisions = async () => {
+    if (executionLoading) return;
     if (!decisionPreview?.previewId || selectedDecisionIds.size === 0) return;
     const selected = decisionPreview.decisions.filter(decision =>
       selectedDecisionIds.has(getDecisionId(decision))
@@ -430,6 +460,7 @@ export default function CleanerPage() {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (data?.reconnect) { setGmailConnected(false); return; }
         if (res.status === 403) {
           setNeedsUpgrade(true);
           setUpgradeMessage('Unlock bulk cleanup to apply all actions in one click');
@@ -512,15 +543,17 @@ export default function CleanerPage() {
 
   const classifyAllAfterScan = async (senders: SenderRow[]) => {
     setClassifying(true);
+    setClassifyError(false);
     try {
       const res = await fetch('/api/agent/classify-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ senders }),
       });
+      if (!res.ok) { setClassifyError(true); return; }
       const data = await res.json();
       if (data.classifications) applyClassifications(data.classifications);
-    } catch { /* best-effort */ } finally {
+    } catch { setClassifyError(true); } finally {
       setClassifying(false);
     }
   };
@@ -561,11 +594,15 @@ export default function CleanerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messageId: sender.sampleMessageId }),
       });
-      const data = await res.json();
-      if (data.method === 'one-click-post') log(`✓ Unsubscribed from ${sender.email} (one-click)`);
-      else if (data.method === 'mailto') log(`✓ Unsubscribe email sent to ${data.to}`);
-      else if (data.method === 'link') log(`→ Manual unsubscribe: ${data.url}`);
-      else log(`— No unsubscribe option for ${sender.email}`);
+      if (!res.ok) {
+        log(`✕ Unsubscribe request failed for ${sender.email} (${res.status})`);
+      } else {
+        const data = await res.json();
+        if (data.method === 'one-click-post') log(`✓ Unsubscribed from ${sender.email} (one-click)`);
+        else if (data.method === 'mailto') log(`✓ Unsubscribe email sent to ${data.to}`);
+        else if (data.method === 'link') log(`→ Manual unsubscribe: ${data.url}`);
+        else log(`— No unsubscribe option for ${sender.email}`);
+      }
     } catch {
       log(`✕ Unsubscribe failed for ${sender.email}`);
     }
@@ -584,13 +621,24 @@ export default function CleanerPage() {
   const runCategoryClean = async (senders: SenderRow[], label: string) => {
     setConfirmModal(null);
     setBulkProgress({ label, done: 0, total: senders.length });
+    let errorCount = 0;
     for (let i = 0; i < senders.length; i++) {
       const s = senders[i];
-      if (s.canAutoUnsubscribe) await unsubAndTrashSender(s);
-      else await trashSender(s.email);
+      try {
+        if (s.canAutoUnsubscribe) await unsubAndTrashSender(s);
+        else await trashSender(s.email);
+      } catch {
+        errorCount++;
+        log(`✕ Failed to process ${s.email}`);
+      }
       setBulkProgress({ label, done: i + 1, total: senders.length });
     }
     setBulkProgress(null);
+    if (errorCount > 0) {
+      log(`Bulk clean finished — ${senders.length - errorCount} succeeded, ${errorCount} failed.`);
+    } else {
+      log(`Bulk clean finished — ${senders.length} sender(s) processed.`);
+    }
   };
 
   const runUnsubQueue = () => {
@@ -668,7 +716,7 @@ export default function CleanerPage() {
         <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'60vh' }}>
           <div style={{ textAlign:'center' }}>
             <div className={styles.spinner} />
-            <p className={styles.spinnerLabel}>INITIALIZING...</p>
+            <p className={styles.spinnerLabel}>CHECKING GMAIL CONNECTION...</p>
           </div>
         </div>
       </Shell>
@@ -733,6 +781,12 @@ export default function CleanerPage() {
 
       <ScanTerminal scanLines={scanLines} scanning={scanning} classifying={classifying} />
 
+      {classifyError && (
+        <div style={{ marginTop: 8, color: '#ffb86c', fontSize: 13 }}>
+          ⚠️ Sender classification failed — categories may be incomplete.
+        </div>
+      )}
+
       {previewLoading && (
         <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>
           <p style={{ margin: 0 }}>Analyzing your inbox...</p>
@@ -794,21 +848,26 @@ export default function CleanerPage() {
               Clear selection
             </button>
             <span style={{ alignSelf: 'center', fontSize: 13 }}>
-              Selected: {selectedDecisionIds.size}
+              Selected: {selectedDecisionIds.size}{selectedDecisionIds.size > 0 && safeNowCount > 0 && selectedDecisionIds.size === safeNowCount ? ' (auto)' : ''}
             </span>
           </div>
           <div style={{ marginBottom: 8, fontSize: 13, opacity: 0.9 }}>
             <p style={{ margin: 0 }}>Nothing is deleted without your approval</p>
             <p style={{ margin: '4px 0 0 0' }}>You can review every action before applying</p>
           </div>
-          {paymentPending && (
+          {(paymentPending || paymentCheckAgain) && (
             <div style={{ marginTop: 8, marginBottom: 8, padding: '10px 14px', background: 'rgba(80,200,120,0.12)', border: '1px solid #50c878', borderRadius: 6 }}>
               <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-                ⏳ Payment processing — activating your subscription...
+                {paymentPending ? '⏳ Payment processing — activating your subscription...' : '⚠️ Subscription not detected yet'}
               </p>
               <p style={{ margin: '4px 0 0 0', fontSize: 13, opacity: 0.85 }}>
-                This usually takes a few seconds. You'll be unlocked automatically.
+                {paymentPending ? "This usually takes a few seconds. You'll be unlocked automatically." : 'It may take a moment. Click below to check again.'}
               </p>
+              {paymentCheckAgain && (
+                <button className={styles.btnOutline} style={{ marginTop: 8 }} onClick={checkSubscriptionNow}>
+                  Check again
+                </button>
+              )}
             </div>
           )}
           {needsUpgrade && !paymentPending && (
@@ -930,12 +989,29 @@ export default function CleanerPage() {
               Execution error: {executionError}
             </p>
           )}
-          {executionResult && (
-            <p style={{ margin: '10px 0 0 0', fontSize: 14 }}>
-              Execution summary: applied {executionResult.applied.delete + executionResult.applied.archive + executionResult.applied.keep + executionResult.applied.reply}
-              {' '}· skipped {executionResult.skipped} · errors {executionResult.errors}
-            </p>
-          )}
+          {executionResult && (() => {
+            const appliedTotal = executionResult.applied.delete + executionResult.applied.archive + executionResult.applied.keep + executionResult.applied.reply;
+            const skippedByReason = executionResult.results
+              ? executionResult.results.filter(r => r.status === 'skipped').reduce<Record<string, number>>((acc, r) => {
+                  const key = r.reason || 'unknown';
+                  acc[key] = (acc[key] || 0) + 1;
+                  return acc;
+                }, {})
+              : {};
+            const skippedDetail = Object.entries(skippedByReason).map(([k, v]) => `${v} ${k}`).join(', ');
+            return (
+              <div style={{ margin: '10px 0 0 0', fontSize: 14 }}>
+                <p style={{ margin: 0 }}>
+                  Applied {appliedTotal} · Deleted {executionResult.applied.delete} · Archived {executionResult.applied.archive}
+                </p>
+                {executionResult.skipped > 0 && (
+                  <p style={{ margin: '4px 0 0 0', opacity: 0.85 }}>
+                    Skipped {executionResult.skipped}{skippedDetail ? ` (${skippedDetail})` : ''} · Errors {executionResult.errors}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -970,14 +1046,13 @@ export default function CleanerPage() {
           {selectedHistoryRecord && (
             <div style={{ marginTop: 10, fontSize: 13 }}>
               <p style={{ margin: '0 0 6px 0' }}>
-                <strong>Details</strong> · previewId: {selectedHistoryRecord.previewId}
+                <strong>Details</strong> · {new Date(selectedHistoryRecord.executedAt).toLocaleString()}
               </p>
-              <p style={{ margin: '0 0 6px 0' }}>
-                Result: applied {selectedHistoryRecord.result.applied.delete + selectedHistoryRecord.result.applied.archive + selectedHistoryRecord.result.applied.keep + selectedHistoryRecord.result.applied.reply}
-                {' '}· skipped {selectedHistoryRecord.result.skipped} · errors {selectedHistoryRecord.result.errors}
+              <p style={{ margin: '0 0 4px 0' }}>
+                Deleted: {selectedHistoryRecord.result.applied.delete} · Archived: {selectedHistoryRecord.result.applied.archive} · Kept: {selectedHistoryRecord.result.applied.keep} · Replied: {selectedHistoryRecord.result.applied.reply}
               </p>
-              <p style={{ margin: 0 }}>
-                selectedDecisionIds: {selectedHistoryRecord.selectedDecisionIds.join(', ') || '(none)'}
+              <p style={{ margin: 0, opacity: 0.8 }}>
+                Skipped: {selectedHistoryRecord.result.skipped} · Errors: {selectedHistoryRecord.result.errors} · Actions submitted: {selectedHistoryRecord.selectedDecisionIds.length}
               </p>
             </div>
           )}

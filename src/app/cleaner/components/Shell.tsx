@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 import styles from '../cleaner.module.css';
 
@@ -7,6 +10,8 @@ interface ShellProps {
 }
 
 export default function Shell({ children, onDisconnect }: ShellProps) {
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+
   return (
     <div className={styles.root}>
       <nav className={styles.nav}>
@@ -14,9 +19,21 @@ export default function Shell({ children, onDisconnect }: ShellProps) {
           clean<span>inbox</span>.ai
         </Link>
         <div className={styles.navActions}>
-          <button className={styles.btnGhost} onClick={onDisconnect}>
-            DISCONNECT GMAIL
-          </button>
+          {confirmingDisconnect ? (
+            <>
+              <span style={{ fontSize: 13, opacity: 0.85 }}>Disconnect Gmail?</span>
+              <button className={styles.btnGhost} onClick={() => { setConfirmingDisconnect(false); onDisconnect(); }}>
+                YES
+              </button>
+              <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(false)}>
+                CANCEL
+              </button>
+            </>
+          ) : (
+            <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(true)}>
+              DISCONNECT GMAIL
+            </button>
+          )}
         </div>
       </nav>
       <div className={styles.content}>{children}</div>
