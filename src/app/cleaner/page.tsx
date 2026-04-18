@@ -175,6 +175,7 @@ export default function CleanerPage() {
   const [upgradeMessage, setUpgradeMessage] = useState('Unlock bulk cleanup to apply all actions in one click');
   const [upgradeRemainingCount, setUpgradeRemainingCount] = useState(0);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [paymentPending, setPaymentPending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -493,15 +494,16 @@ export default function CleanerPage() {
   const startCheckoutUpgrade = async () => {
     track('upgrade_clicked');
     setUpgradeLoading(true);
+    setUpgradeError(null);
     try {
       const res = await fetch('/api/stripe/checkout', { method: 'POST' });
-      const data = await res.json();
+      const data = res.headers.get('content-type')?.includes('json') ? await res.json() : {};
       if (!res.ok || !data?.url) {
         throw new Error(data?.error || 'Failed to start checkout.');
       }
       window.location.href = data.url;
     } catch (err: any) {
-      setExecutionError(err?.message || 'Failed to start checkout.');
+      setUpgradeError(err?.message || 'Failed to start checkout.');
     } finally {
       setUpgradeLoading(false);
     }
@@ -900,6 +902,11 @@ export default function CleanerPage() {
               >
                 {upgradeLoading ? 'REDIRECTING...' : 'Upgrade to clean everything'}
               </button>
+              {upgradeError && (
+                <p style={{ margin: '8px 0 0 0', color: '#ff6b6b', fontSize: 13 }}>
+                  {upgradeError}
+                </p>
+              )}
             </div>
           )}
           {decisionPreview.dropped > 0 && (
