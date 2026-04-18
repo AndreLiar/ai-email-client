@@ -2,6 +2,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import './globals.css';
 import { ReactNode } from 'react';
 import { Space_Mono, Syne } from 'next/font/google';
+import { ClerkProvider } from '@clerk/nextjs';
 
 const spaceMono = Space_Mono({
   weight: ['400', '700'],
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" data-gramm="false" className={`${spaceMono.variable} ${syne.variable}`}>
       <body suppressHydrationWarning={true}>
-        {children}
+        <ClerkProvider>
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 
 import type { SenderRow, ScanResult, SenderStatus, ScanLine } from './types';
 import { PAGE_SIZE, priorityScore } from './utils';
@@ -21,10 +22,72 @@ import ConfirmModal from './components/ConfirmModal';
 import ActionLog from './components/ActionLog';
 import styles from './cleaner.module.css';
 
+type PreviewDecisionAction = 'delete' | 'archive' | 'keep' | 'reply';
+
+interface DecisionPreviewDecision {
+  decisionId?: string;
+  messageId: string;
+  action: PreviewDecisionAction;
+  confidence: number;
+  reason: string;
+}
+
+interface DecisionPreviewData {
+  previewId?: string;
+  dropped: number;
+  summary: {
+    delete: number;
+    archive: number;
+    keep: number;
+    reply: number;
+  };
+  decisions: DecisionPreviewDecision[];
+}
+
+interface ExecutionResultData {
+  applied: {
+    delete: number;
+    archive: number;
+    keep: number;
+    reply: number;
+  };
+  skipped: number;
+  errors: number;
+  results?: Array<{
+    messageId: string;
+    action: PreviewDecisionAction;
+    status: 'applied' | 'skipped' | 'error';
+    reason?: string;
+  }>;
+}
+
+interface HistoryRecordData {
+  previewId: string;
+  selectedDecisionIds: string[];
+  result: {
+    applied: {
+      delete: number;
+      archive: number;
+      keep: number;
+      reply: number;
+    };
+    skipped: number;
+    errors: number;
+  };
+  executedAt: number;
+}
+
 export default function CleanerPage() {
   const router = useRouter();
+  const { isLoaded, userId } = useAuth();
 
   // ── Auth ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      router.replace('/sign-in');
+    }
+  }, [isLoaded, userId, router]);
+
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
   useEffect(() => {
     fetch('/api/auth/status').then(r => r.json()).then(d => setGmailConnected(d.connected));
@@ -36,6 +99,19 @@ export default function CleanerPage() {
   const [scanLines, setScanLines] = useState<ScanLine[]>([]);
   const [classifying, setClassifying] = useState(false);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
+  const [decisionPreview, setDecisionPreview] = useState<DecisionPreviewData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [selectedDecisionIds, setSelectedDecisionIds] = useState<Set<string>>(new Set());
+  const [executionLoading, setExecutionLoading] = useState(false);
+  const [executionResult, setExecutionResult] = useState<ExecutionResultData | null>(null);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecordData[]>([]);
+  const [selectedHistoryRecord, setSelectedHistoryRecord] = useState<HistoryRecordData | null>(null);
 
   // ── Table state ──────────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -124,6 +200,12 @@ export default function CleanerPage() {
     setSenderStatuses({});
     setActionLog([]);
     setSummaryDismissed(false);
+    setDecisionPreview(null);
+    setPreviewError(null);
+    setSelectedDecisionIds(new Set());
+    setExecutionResult(null);
+    setExecutionError(null);
+    setNeedsUpgrade(false);
 
     try {
       const res = await fetch('/api/agent/scan-senders');
@@ -171,6 +253,152 @@ export default function CleanerPage() {
       log('Scan failed.');
     } finally {
       setScanning(false);
+    }
+  };
+
+  const getDecisionId = (decision: DecisionPreviewDecision): string =>
+    decision.decisionId || decision.messageId;
+
+  const isEligibleDecision = (decision: DecisionPreviewDecision): boolean => {
+    if (decision.action === 'delete') return decision.confidence >= 0.9;
+    if (decision.action === 'archive') return decision.confidence >= 0.75;
+    return false;
+  };
+
+  const isBlockedReason = (reason: string): boolean => {
+    const normalized = reason.toLowerCase();
+    return normalized.includes('guardrail') || normalized.includes('unsafe_reply_recipient') || normalized.includes('blocked');
+  };
+
+  const isErrorReason = (reason: string): boolean => {
+    const normalized = reason.toLowerCase();
+    return normalized.includes('failed') || normalized.includes('error') || normalized.includes('metadata_fetch_failed');
+  };
+
+  const getPreviewStatus = (decision: DecisionPreviewDecision): 'selected' | 'selectable' | 'skipped' | 'error' => {
+    if (isErrorReason(decision.reason)) return 'error';
+    if (isBlockedReason(decision.reason)) return 'skipped';
+    return selectedDecisionIds.has(getDecisionId(decision)) ? 'selected' : 'selectable';
+  };
+
+  const findExecutionItem = (decision: DecisionPreviewDecision) =>
+    executionResult?.results?.find(item => item.messageId === decision.messageId && item.action === decision.action);
+
+  const previewAIDecisions = async () => {
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setDecisionPreview(null);
+    setExecutionResult(null);
+    setExecutionError(null);
+    try {
+      const res = await fetch('/api/agent/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: 'is:unread older_than:180d',
+          limit: 100,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to preview decisions.');
+
+      setDecisionPreview(data);
+      const autoSelected = new Set<string>(
+        (data.decisions || [])
+          .filter((decision: DecisionPreviewDecision) => isEligibleDecision(decision))
+          .map((decision: DecisionPreviewDecision) => getDecisionId(decision))
+          .filter((id: string): id is string => Boolean(id))
+      );
+      setSelectedDecisionIds(autoSelected);
+      log(`Decision preview ready — ${data.decisions?.length ?? 0} decisions.`);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to preview decisions.';
+      setPreviewError(message);
+      setSelectedDecisionIds(new Set());
+      log(`Decision preview failed: ${message}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const applySelectedDecisions = async () => {
+    if (!decisionPreview?.previewId || selectedDecisionIds.size === 0) return;
+    const selected = decisionPreview.decisions.filter(decision =>
+      selectedDecisionIds.has(getDecisionId(decision))
+    );
+    const deleteCount = selected.filter(d => d.action === 'delete').length;
+    const archiveCount = selected.filter(d => d.action === 'archive').length;
+    const confirmed = window.confirm(
+      `Apply ${selected.length} selected decisions?\n\nDelete actions: ${deleteCount}\nArchive actions: ${archiveCount}`
+    );
+    if (!confirmed) return;
+
+    setExecutionLoading(true);
+    setExecutionError(null);
+    setExecutionResult(null);
+    setNeedsUpgrade(false);
+    try {
+      const res = await fetch('/api/agent/execute-decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          previewId: decisionPreview.previewId,
+          selectedDecisionIds: Array.from(selectedDecisionIds),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 403) {
+          setNeedsUpgrade(true);
+          throw new Error('Upgrade required to execute actions');
+        }
+        throw new Error(data?.error || 'Failed to execute decisions.');
+      }
+      setExecutionResult(data);
+      log('Decision execution completed.');
+    } catch (err: any) {
+      const message = err?.message || 'Failed to execute decisions.';
+      setExecutionError(message);
+      log(`Decision execution failed: ${message}`);
+    } finally {
+      setExecutionLoading(false);
+    }
+  };
+
+  const startCheckoutUpgrade = async () => {
+    setUpgradeLoading(true);
+    try {
+      const res = await fetch('/api/stripe/checkout', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data?.url) {
+        throw new Error(data?.error || 'Failed to start checkout.');
+      }
+      window.location.href = data.url;
+    } catch (err: any) {
+      setExecutionError(err?.message || 'Failed to start checkout.');
+    } finally {
+      setUpgradeLoading(false);
+    }
+  };
+
+  const viewHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await fetch('/api/agent/history');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to fetch history.');
+      const records: HistoryRecordData[] = data.records || [];
+      setHistoryRecords(records);
+      setSelectedHistoryRecord(records[0] || null);
+      log(`Loaded history (${records.length} execution records).`);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to fetch history.';
+      setHistoryError(message);
+      log(`History load failed: ${message}`);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -372,6 +600,12 @@ export default function CleanerPage() {
           <button className={styles.btnOutline} onClick={() => setShowChat(v => !v)}>
             {showChat ? 'HIDE AGENT' : '✦ ASK AI AGENT'}
           </button>
+          <button className={styles.btnOutline} onClick={previewAIDecisions} disabled={previewLoading || scanning}>
+            {previewLoading ? 'PREVIEWING...' : 'Preview AI Decisions'}
+          </button>
+          <button className={styles.btnOutline} onClick={viewHistory} disabled={historyLoading}>
+            {historyLoading ? 'LOADING HISTORY...' : 'View History'}
+          </button>
           <button className={styles.btnPrimary} onClick={scanInbox} disabled={scanning}>
             {scanning ? 'SCANNING...' : 'SCAN INBOX'}
           </button>
@@ -379,6 +613,205 @@ export default function CleanerPage() {
       </div>
 
       <ScanTerminal scanLines={scanLines} scanning={scanning} classifying={classifying} />
+
+      {previewError && (
+        <div style={{ marginTop: 12, color: '#ff6b6b', fontSize: 14 }}>
+          Decision preview error: {previewError}
+        </div>
+      )}
+
+      {decisionPreview && (
+        <div style={{ marginTop: 16, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: 12 }}>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: 16 }}>AI Decision Preview</h3>
+          {decisionPreview.previewId && (
+            <p style={{ margin: '0 0 8px 0', fontSize: 12, opacity: 0.8 }}>Preview ID: {decisionPreview.previewId}</p>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button
+              className={styles.btnOutline}
+              onClick={() => {
+                const eligible = new Set<string>(
+                  decisionPreview.decisions
+                    .filter(d => isEligibleDecision(d))
+                    .map(d => getDecisionId(d))
+                    .filter((id: string): id is string => Boolean(id))
+                );
+                setSelectedDecisionIds(eligible);
+              }}
+            >
+              Select all eligible
+            </button>
+            <button className={styles.btnOutline} onClick={() => setSelectedDecisionIds(new Set())}>
+              Clear selection
+            </button>
+            <button
+              className={styles.btnPrimary}
+              onClick={applySelectedDecisions}
+              disabled={!decisionPreview.previewId || selectedDecisionIds.size === 0 || executionLoading}
+            >
+              {executionLoading ? 'APPLYING...' : 'Apply Selected Decisions'}
+            </button>
+            <span style={{ alignSelf: 'center', fontSize: 13 }}>
+              Selected: {selectedDecisionIds.size}
+            </span>
+          </div>
+          <p style={{ margin: '0 0 8px 0', fontSize: 14 }}>
+            Summary: delete {decisionPreview.summary.delete} · archive {decisionPreview.summary.archive} · keep {decisionPreview.summary.keep} · reply {decisionPreview.summary.reply}
+          </p>
+          {decisionPreview.dropped > 0 && (
+            <p style={{ margin: '0 0 8px 0', fontSize: 14, color: '#ffb86c' }}>
+              Dropped: {decisionPreview.dropped}
+            </p>
+          )}
+          {(() => {
+            const eligible = decisionPreview.decisions.filter(d => !isBlockedReason(d.reason) && !isErrorReason(d.reason));
+            const blocked = decisionPreview.decisions.filter(d => isBlockedReason(d.reason));
+            const errors = decisionPreview.decisions.filter(d => isErrorReason(d.reason));
+
+            const renderDecision = (decision: DecisionPreviewDecision, allowSelect: boolean) => {
+              const status = getPreviewStatus(decision);
+              const executionItem = findExecutionItem(decision);
+              return (
+                <li key={decision.decisionId || decision.messageId} style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    {allowSelect ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedDecisionIds.has(getDecisionId(decision))}
+                        onChange={e => {
+                          const id = getDecisionId(decision);
+                          setSelectedDecisionIds(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(id);
+                            else next.delete(id);
+                            return next;
+                          });
+                        }}
+                      />
+                    ) : (
+                      <span style={{ width: 14 }} />
+                    )}
+                    <div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11, padding: '2px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 999 }}>
+                          {decision.action}
+                        </span>
+                        <span style={{ fontSize: 11, padding: '2px 6px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 999 }}>
+                          {status}
+                        </span>
+                        {decision.action === 'delete' && (
+                          <span style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #ffb86c', borderRadius: 999, color: '#ffb86c' }}>
+                            warning
+                          </span>
+                        )}
+                        <span style={{ fontSize: 12, opacity: 0.85 }}>conf {(decision.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                      <div style={{ fontSize: 13, marginTop: 4 }}>
+                        {status === 'skipped' ? `Blocked: ${decision.reason}` : status === 'error' ? `Error: ${decision.reason}` : `Reason: ${decision.reason}`}
+                      </div>
+                      {executionItem && (
+                        <div style={{ fontSize: 12, marginTop: 2, opacity: 0.9 }}>
+                          Execution: {executionItem.status}{executionItem.reason ? ` (${executionItem.reason})` : ''}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            };
+
+            return (
+              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                <div style={{ marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13 }}>Eligible ({eligible.length})</strong>
+                  <ul style={{ margin: '6px 0 0 0', paddingLeft: 0, listStyle: 'none' }}>
+                    {eligible.map(d => renderDecision(d, true))}
+                  </ul>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13 }}>Blocked ({blocked.length})</strong>
+                  <ul style={{ margin: '6px 0 0 0', paddingLeft: 0, listStyle: 'none' }}>
+                    {blocked.map(d => renderDecision(d, false))}
+                  </ul>
+                </div>
+                <div>
+                  <strong style={{ fontSize: 13 }}>Errors ({errors.length})</strong>
+                  <ul style={{ margin: '6px 0 0 0', paddingLeft: 0, listStyle: 'none' }}>
+                    {errors.map(d => renderDecision(d, false))}
+                  </ul>
+                </div>
+              </div>
+            );
+          })()}
+          {executionError && (
+            <p style={{ margin: '10px 0 0 0', color: '#ff6b6b', fontSize: 14 }}>
+              Execution error: {executionError}
+            </p>
+          )}
+          {needsUpgrade && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                className={styles.btnPrimary}
+                onClick={startCheckoutUpgrade}
+                disabled={upgradeLoading}
+              >
+                {upgradeLoading ? 'REDIRECTING...' : 'Upgrade'}
+              </button>
+            </div>
+          )}
+          {executionResult && (
+            <p style={{ margin: '10px 0 0 0', fontSize: 14 }}>
+              Execution summary: applied {executionResult.applied.delete + executionResult.applied.archive + executionResult.applied.keep + executionResult.applied.reply}
+              {' '}· skipped {executionResult.skipped} · errors {executionResult.errors}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(historyError || historyRecords.length > 0) && (
+        <div style={{ marginTop: 16, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: 12 }}>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: 16 }}>Execution History</h3>
+          {historyError && (
+            <p style={{ margin: '0 0 8px 0', color: '#ff6b6b', fontSize: 14 }}>
+              History error: {historyError}
+            </p>
+          )}
+          <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 180, overflowY: 'auto' }}>
+            {historyRecords.map(record => {
+              const appliedTotal =
+                record.result.applied.delete +
+                record.result.applied.archive +
+                record.result.applied.keep +
+                record.result.applied.reply;
+              return (
+                <li key={`${record.previewId}-${record.executedAt}`} style={{ marginBottom: 8 }}>
+                  <button
+                    className={styles.btnOutline}
+                    style={{ width: '100%', textAlign: 'left' }}
+                    onClick={() => setSelectedHistoryRecord(record)}
+                  >
+                    {record.previewId} · {new Date(record.executedAt).toLocaleString()} · applied {appliedTotal} · skipped {record.result.skipped} · errors {record.result.errors}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {selectedHistoryRecord && (
+            <div style={{ marginTop: 10, fontSize: 13 }}>
+              <p style={{ margin: '0 0 6px 0' }}>
+                <strong>Details</strong> · previewId: {selectedHistoryRecord.previewId}
+              </p>
+              <p style={{ margin: '0 0 6px 0' }}>
+                Result: applied {selectedHistoryRecord.result.applied.delete + selectedHistoryRecord.result.applied.archive + selectedHistoryRecord.result.applied.keep + selectedHistoryRecord.result.applied.reply}
+                {' '}· skipped {selectedHistoryRecord.result.skipped} · errors {selectedHistoryRecord.result.errors}
+              </p>
+              <p style={{ margin: 0 }}>
+                selectedDecisionIds: {selectedHistoryRecord.selectedDecisionIds.join(', ') || '(none)'}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {showChat && (
         <ChatPanel

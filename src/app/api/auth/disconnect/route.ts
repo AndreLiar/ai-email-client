@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { COOKIE_ACCESS, COOKIE_REFRESH } from '@/services/auth';
+import { auth } from '@clerk/nextjs/server';
+import { clearGmailTokens } from '@/services/storage';
 
 export async function POST() {
-  const response = NextResponse.json({ ok: true });
-  response.cookies.delete(COOKIE_ACCESS);
-  response.cookies.delete(COOKIE_REFRESH);
-  return response;
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ ok: true });
+  await clearGmailTokens(userId);
+  return NextResponse.json({ ok: true });
 }

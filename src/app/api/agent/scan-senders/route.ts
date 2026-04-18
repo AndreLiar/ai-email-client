@@ -1,10 +1,26 @@
 import { getValidAccessToken } from '@/services/auth';
 import { listMessages, getMessageMetadata, parseFromHeader } from '@/services/gmail';
 import type { SenderInfo } from '@/types/email';
+import { auth } from '@clerk/nextjs/server';
 
 export const maxDuration = 60;
 
 export async function GET() {
+  const { userId } = await auth();
+  if (!userId) {
+    return new Response(
+      `data: ${JSON.stringify({ phase: 'error', message: 'Error: Unauthorized' })}\n\n`,
+      {
+        status: 401,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      }
+    );
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -16,7 +32,7 @@ export async function GET() {
       try {
         send({ phase: 'init', message: 'Connecting to Gmail API...' });
 
-        const accessToken = await getValidAccessToken();
+        const accessToken = await getValidAccessToken(userId);
 
         // ── Phase 1: collect all unread email IDs older than 6 months ──────
         send({ phase: 'ids', message: 'Scanning mailbox for unread emails older than 6 months...' });

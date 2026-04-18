@@ -1,12 +1,16 @@
-import { cookies } from 'next/headers';
+import { getGmailTokens, saveGmailTokens } from '@/services/storage';
 
 export const COOKIE_ACCESS = 'gmail_access_token';
 export const COOKIE_REFRESH = 'gmail_refresh_token';
 
-export async function getValidAccessToken(): Promise<string> {
-  const cookieStore = await cookies();
-  let accessToken = cookieStore.get(COOKIE_ACCESS)?.value;
-  const refreshToken = cookieStore.get(COOKIE_REFRESH)?.value;
+interface GmailProfileResponse {
+  emailAddress?: string;
+}
+
+export async function getValidAccessToken(userId: string): Promise<string> {
+  const tokenRecord = await getGmailTokens(userId);
+  let accessToken = tokenRecord?.accessToken;
+  const refreshToken = tokenRecord?.refreshToken;
 
   if (!accessToken) throw new Error('Gmail not connected');
 
@@ -32,13 +36,19 @@ export async function getValidAccessToken(): Promise<string> {
   const newTokens = await tokenRes.json();
   if (!newTokens.access_token) throw new Error('Failed to refresh Gmail token. Please reconnect.');
 
+  await saveGmailTokens(userId, {
+    accessToken: newTokens.access_token,
+    refreshToken: refreshToken,
+    updatedAt: Date.now(),
+  });
+
   console.log('Gmail access token refreshed successfully.');
-  return newTokens.access_token;
+  return newTokens.access_token as string;
 }
 
-export async function isGmailConnected(): Promise<boolean> {
-  const cookieStore = await cookies();
-  return !!cookieStore.get(COOKIE_ACCESS)?.value;
+export async function isGmailConnected(userId: string): Promise<boolean> {
+  const tokenRecord = await getGmailTokens(userId);
+  return !!tokenRecord?.accessToken;
 }
 
 export function buildGmailAuthUrl(): string {
@@ -71,4 +81,16 @@ export async function exchangeCodeForTokens(
     }),
   });
   return res.json();
+}
+
+export async function getGmailUserId(accessToken: string): Promise<string> {
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch Gmail profile.');
+
+  const profile = await res.json() as GmailProfileResponse;
+  const email = profile.emailAddress?.trim().toLowerCase();
+  if (!email) throw new Error('Failed to resolve Gmail user identity.');
+  return email;
 }

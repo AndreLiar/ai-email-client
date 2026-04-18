@@ -140,3 +140,22 @@ npm run dev          # Start dev server (localhost:3000)
 npm run build        # Production build
 npm run lint         # ESLint
 ```
+
+---
+
+## Vercel Deployment Notes
+
+Set these environment variables in Vercel (Project Settings → Environment Variables):
+
+- `DATABASE_URL`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+
+Keep server-only secrets (`DATABASE_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `CLERK_SECRET_KEY`, `GOOGLE_CLIENT_SECRET`) out of client code. Only `NEXT_PUBLIC_*` keys should be exposed to the browser.
+
+For Stripe webhooks, ensure the route runs on Node.js runtime (not Edge).

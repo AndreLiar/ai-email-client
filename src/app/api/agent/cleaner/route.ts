@@ -5,6 +5,7 @@ import { streamText, tool, convertToModelMessages, stepCountIs } from 'ai';
 import { z } from 'zod';
 import type { UIMessage } from 'ai';
 import type { ScanResult } from '@/types/agent';
+import { auth } from '@clerk/nextjs/server';
 
 export const maxDuration = 60;
 
@@ -13,7 +14,9 @@ export async function POST(req: Request) {
 
   let accessToken: string;
   try {
-    accessToken = await getValidAccessToken();
+    const { userId } = await auth();
+    if (!userId) return new Response('Unauthorized', { status: 401 });
+    accessToken = await getValidAccessToken(userId);
   } catch {
     return new Response('Gmail not connected', { status: 403 });
   }
