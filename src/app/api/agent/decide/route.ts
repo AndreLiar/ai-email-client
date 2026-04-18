@@ -70,14 +70,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
     }
 
-    const msg = err?.message || '';
-    console.error('[decide] error:', msg);
+    const msg = err?.message || String(err) || 'unknown';
+    const name = err?.name || '';
+    const cause = err?.cause ? String(err.cause) : '';
+    console.error('[decide] error:', { msg, name, cause, stack: err?.stack?.split('\n')[0] });
+    if (msg.includes('RECONNECT_REQUIRED')) {
+      return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
+    }
     if (msg.includes('Invalid decision payload') || msg.includes('schema')) {
       return NextResponse.json({ error: 'AI returned an unexpected response — please try again.' }, { status: 500 });
     }
-    if (msg.includes('timeout') || msg.includes('AbortError')) {
+    if (msg.includes('timeout') || msg.includes('AbortError') || name === 'TimeoutError') {
       return NextResponse.json({ error: 'AI response timed out — inbox may be too large. Try again.' }, { status: 504 });
     }
-    return NextResponse.json({ error: 'Failed to generate decisions' }, { status: 500 });
+    // Temporary: surface actual error to help diagnose
+    return NextResponse.json({ error: `Failed to generate decisions: ${msg}` }, { status: 500 });
   }
 }
