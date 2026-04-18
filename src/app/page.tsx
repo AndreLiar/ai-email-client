@@ -429,6 +429,127 @@ export default function LandingPage() {
           position: relative;
         }
 
+        /* ── pricing ── */
+        .lp-pricing-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 1.5rem;
+          max-width: 760px;
+        }
+        @media (max-width: 640px) { .lp-pricing-grid { grid-template-columns: 1fr; } }
+
+        .lp-plan {
+          background: #0b1018;
+          border: 1px solid rgba(0,217,126,0.1);
+          border-radius: 6px;
+          padding: 2rem;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+        }
+        .lp-plan-pro {
+          border-color: rgba(0,217,126,0.4);
+          box-shadow: 0 0 40px rgba(0,217,126,0.07);
+        }
+        .lp-plan-badge {
+          position: absolute;
+          top: -12px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #00d97e;
+          color: #06090f;
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          padding: 3px 12px;
+          border-radius: 999px;
+          white-space: nowrap;
+        }
+        .lp-plan-tag {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.6rem;
+          letter-spacing: 0.2em;
+          color: #4a6a54;
+          margin-bottom: 0.75rem;
+        }
+        .lp-plan-price {
+          font-size: 2.8rem;
+          font-weight: 800;
+          color: #7a9a84;
+          line-height: 1;
+          letter-spacing: -0.02em;
+          margin-bottom: 0.25rem;
+        }
+        .lp-plan-per {
+          font-size: 1rem;
+          font-weight: 400;
+          opacity: 0.6;
+        }
+        .lp-plan-name {
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.7rem;
+          letter-spacing: 0.12em;
+          color: #4a6a54;
+          text-transform: uppercase;
+          margin-bottom: 1.5rem;
+        }
+        .lp-plan-features {
+          list-style: none;
+          padding: 0;
+          margin: 0 0 1.75rem 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.6rem;
+          flex: 1;
+          font-size: 0.875rem;
+          color: #7a9a84;
+          line-height: 1.4;
+        }
+        .lp-plan-features strong { color: #f0f7f2; }
+        .lp-plan-dim { opacity: 0.35; }
+        .lp-plan-btn-primary {
+          display: block;
+          text-align: center;
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.78rem;
+          font-weight: 700;
+          letter-spacing: 0.1em;
+          padding: 0.85rem 1.5rem;
+          background: #00d97e;
+          color: #06090f;
+          text-decoration: none;
+          border-radius: 4px;
+          transition: box-shadow 0.2s, transform 0.15s;
+        }
+        .lp-plan-btn-primary:hover {
+          box-shadow: 0 0 30px rgba(0,217,126,0.35);
+          transform: translateY(-1px);
+          color: #06090f;
+        }
+        .lp-plan-btn-ghost {
+          display: block;
+          text-align: center;
+          font-family: var(--font-space-mono), monospace;
+          font-size: 0.78rem;
+          letter-spacing: 0.1em;
+          padding: 0.85rem 1.5rem;
+          background: transparent;
+          color: #7a9a84;
+          text-decoration: none;
+          border: 1px solid rgba(0,217,126,0.15);
+          border-radius: 4px;
+          transition: border-color 0.2s, color 0.2s;
+        }
+        .lp-plan-btn-ghost:hover { border-color: rgba(0,217,126,0.4); color: #c8d8cc; }
+        .lp-plan-note {
+          margin: 0.75rem 0 0 0;
+          text-align: center;
+          font-size: 0.7rem;
+          color: #4a6a54;
+          font-family: var(--font-space-mono), monospace;
+        }
+
         /* ── footer ── */
         .lp-footer {
           position: relative;
@@ -460,7 +581,7 @@ export default function LandingPage() {
       <div className="lp-root">
         {/* ── Nav ── */}
         <nav className="lp-nav">
-          <a href="/" className="lp-logo">clean<span>inbox</span>.ai</a>
+          <Link href="/" className="lp-logo">clean<span>inbox</span>.ai</Link>
           <Link href="/cleaner" className="lp-nav-cta">LAUNCH APP →</Link>
         </nav>
 
@@ -604,6 +725,62 @@ export default function LandingPage() {
                 <p className="lp-step-text">{text}</p>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* ── Pricing ── */}
+        <section className="lp-section" style={{paddingTop: 0}}>
+          <p className="lp-section-tag">// pricing</p>
+          <h2 className="lp-section-h2">Simple pricing. No surprises.</h2>
+          <p className="lp-section-sub">
+            Start free. Upgrade when you need to clean everything at once.
+          </p>
+          <div className="lp-pricing-grid">
+
+            {/* Free */}
+            <div className="lp-plan">
+              <div className="lp-plan-header">
+                <div className="lp-plan-tag">// free</div>
+                <div className="lp-plan-price">$0<span className="lp-plan-per">/month</span></div>
+                <div className="lp-plan-name">Starter</div>
+              </div>
+              <ul className="lp-plan-features">
+                <li>✓ Scan full inbox</li>
+                <li>✓ AI cleanup plan</li>
+                <li>✓ Apply up to 50 actions</li>
+                <li>✓ Bulk delete by sender</li>
+                <li>✓ Auto-unsubscribe</li>
+                <li className="lp-plan-dim">✗ Unlimited actions</li>
+                <li className="lp-plan-dim">✗ Full inbox cleanup in one click</li>
+              </ul>
+              <Link href="/cleaner" className="lp-plan-btn-ghost">
+                Get started free
+              </Link>
+            </div>
+
+            {/* Pro */}
+            <div className="lp-plan lp-plan-pro">
+              <div className="lp-plan-badge">MOST POPULAR</div>
+              <div className="lp-plan-header">
+                <div className="lp-plan-tag" style={{color:'#00d97e'}}>// pro</div>
+                <div className="lp-plan-price" style={{color:'#f0f7f2'}}>$9<span className="lp-plan-per">/month</span></div>
+                <div className="lp-plan-name">Pro</div>
+              </div>
+              <ul className="lp-plan-features">
+                <li>✓ Everything in Free</li>
+                <li>✓ <strong>Unlimited actions</strong></li>
+                <li>✓ Full inbox cleanup in one click</li>
+                <li>✓ AI decisions on all emails</li>
+                <li>✓ Priority AI processing</li>
+                <li>✓ Execution history</li>
+                <li>✓ Cancel anytime</li>
+              </ul>
+              <Link href="/cleaner" className="lp-plan-btn-primary">
+                Start cleaning →
+              </Link>
+              <p className="lp-plan-note">No credit card required to start</p>
+            </div>
+
           </div>
         </section>
 

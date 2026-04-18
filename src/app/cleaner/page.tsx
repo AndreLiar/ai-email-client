@@ -103,10 +103,15 @@ export default function CleanerPage() {
     setSelectedDecisionIds(new Set());
     fetch('/api/auth/status')
       .then(r => r.ok ? r.json() : { connected: false, subscribed: false })
-      .then(d => setGmailConnected(d.connected))
+      .then(d => { setGmailConnected(d.connected); setIsSubscribed(d.subscribed ?? false); })
       .catch(() => setGmailConnected(false));
   }, [userId]);
 
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [applyConfirmData, setApplyConfirmData] = useState<{
+    deleteCount: number; archiveCount: number; total: number; safeIds: string[];
+  } | null>(null);
   const [paymentCheckAgain, setPaymentCheckAgain] = useState(false);
 
   const checkSubscriptionNow = async () => {
@@ -114,6 +119,7 @@ export default function CleanerPage() {
       const res = await fetch('/api/auth/status');
       const data = res.ok ? await res.json() : {};
       if (data.subscribed) {
+        setIsSubscribed(true);
         setPaymentPending(false);
         setPaymentCheckAgain(false);
         setNeedsUpgrade(false);
@@ -121,35 +127,50 @@ export default function CleanerPage() {
     } catch { /* silent */ }
   };
 
-  // Poll for subscription activation after Stripe redirect
+  // Check subscription after Stripe redirect — immediate + exponential backoff
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('success') !== 'true') return;
     setPaymentPending(true);
     router.replace('/cleaner', { scroll: false });
-    const deadline = Date.now() + 60_000;
-    const interval = setInterval(async () => {
+    // Delays between retries: immediate, +3s, +5s, +12s, +15s (total ~35s max)
+    const gaps = [0, 3000, 5000, 12000, 15000];
+    let cancelled = false;
+    let attempt = 0;
+    const doCheck = async () => {
+      if (cancelled) return;
       try {
         const res = await fetch('/api/auth/status');
         const data = res.ok ? await res.json() : {};
         if (data.subscribed) {
+          setIsSubscribed(true);
           setPaymentPending(false);
           setPaymentCheckAgain(false);
           setNeedsUpgrade(false);
-          clearInterval(interval);
-        } else if (Date.now() > deadline) {
-          setPaymentPending(false);
-          setPaymentCheckAgain(true);
-          clearInterval(interval);
+          return;
         }
-      } catch {
-        clearInterval(interval);
+      } catch { /* ignore */ }
+      attempt++;
+      if (attempt < gaps.length) {
+        setTimeout(doCheck, gaps[attempt]);
+      } else {
         setPaymentPending(false);
         setPaymentCheckAgain(true);
       }
-    }, 2000);
-    return () => clearInterval(interval);
+    };
+    doCheck();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Show welcome modal on first sign-in
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+    if (typeof window === 'undefined') return;
+    if (!localStorage.getItem('cleaninbox_welcomed')) {
+      setShowWelcome(true);
+      localStorage.setItem('cleaninbox_welcomed', '1');
+    }
+  }, [isLoaded, userId]);
+
   useEffect(() => {
     if (!gmailConnected) return;
     if (gmailConnectedTrackedRef.current) return;
@@ -249,6 +270,19 @@ export default function CleanerPage() {
   }, [pendingAutoAnalyze, scanResult, status]);
 
   // ── Helpers ──────────────────────────────────────────────────────
+  const renderError = (msg: string) => {
+    const isReconnect = msg.includes('RECONNECT_REQUIRED') || msg.includes('Gmail not connected') || msg.includes('token expired');
+    const isTimeout = msg.includes('timeout') || msg.includes('AbortError') || msg.includes('Failed to fetch');
+    const isAI = msg.includes('Failed to generate') || msg.includes('Invalid decision') || msg.includes('AI');
+    if (isReconnect) return (
+      <span>Gmail connection lost. <a href="/api/auth/gmail-connect" style={{ color: '#00d97e', textDecoration: 'underline' }}>Reconnect Gmail →</a></span>
+    );
+    if (isTimeout || isAI) return (
+      <span>AI service timed out. <button style={{ background: 'none', border: 'none', color: '#00d97e', textDecoration: 'underline', cursor: 'pointer', padding: 0 }} onClick={previewAIDecisions}>Try again →</button></span>
+    );
+    return <span>{msg}</span>;
+  };
+
   const log = (msg: string) =>
     setActionLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
 
@@ -417,32 +451,42 @@ export default function CleanerPage() {
     track('preview_generated', { count: decisionPreview.decisions.length });
   }, [decisionPreview]);
 
-  const applySelectedDecisions = async () => {
+  // Step 1: check paywall + open confirm modal (P0 #2 & #3)
+  const requestApply = () => {
     if (executionLoading) return;
     if (!decisionPreview?.previewId || selectedDecisionIds.size === 0) return;
-    const selected = decisionPreview.decisions.filter(decision =>
-      selectedDecisionIds.has(getDecisionId(decision))
+    const eligibleDecisions = decisionPreview.decisions.filter(d =>
+      selectedDecisionIds.has(getDecisionId(d)) && isEligibleDecision(d)
     );
-    const safeSelectedDecisionIds = selected
-      .filter(decision => isEligibleDecision(decision))
-      .map(decision => getDecisionId(decision))
-      .filter((id: string): id is string => Boolean(id));
-    track('apply_safe_clicked', { selectedCount: safeSelectedDecisionIds.length });
-    if (safeSelectedDecisionIds.length === 0) {
-      setExecutionError('No safe actions selected to apply.');
-      return;
-    }
-    if (safeSelectedDecisionIds.length > FREE_APPLY_LIMIT) {
+    const safeIds = eligibleDecisions
+      .map(d => getDecisionId(d))
+      .filter((id): id is string => Boolean(id));
+    track('apply_safe_clicked', { selectedCount: safeIds.length });
+    if (safeIds.length === 0) { setExecutionError('No safe actions selected to apply.'); return; }
+
+    // Paywall check BEFORE confirm modal (P0 #3)
+    if (safeIds.length > FREE_APPLY_LIMIT && !isSubscribed) {
       setNeedsUpgrade(true);
       setUpgradeMessage('Free plan allows up to 50 actions. Upgrade to clean everything at once.');
-      setUpgradeRemainingCount(safeSelectedDecisionIds.length - FREE_APPLY_LIMIT);
-      track('upgrade_shown', {
-        reason: 'quota',
-        remaining: safeSelectedDecisionIds.length - FREE_APPLY_LIMIT,
-      });
+      setUpgradeRemainingCount(safeIds.length - FREE_APPLY_LIMIT);
+      track('upgrade_shown', { reason: 'quota', remaining: safeIds.length - FREE_APPLY_LIMIT });
       return;
     }
 
+    // Show confirm modal (P0 #2)
+    setApplyConfirmData({
+      deleteCount: eligibleDecisions.filter(d => d.action === 'delete').length,
+      archiveCount: eligibleDecisions.filter(d => d.action === 'archive').length,
+      total: safeIds.length,
+      safeIds,
+    });
+  };
+
+  // Step 2: user confirmed — execute
+  const executeApproved = async () => {
+    if (!applyConfirmData || !decisionPreview?.previewId) return;
+    const { safeIds } = applyConfirmData;
+    setApplyConfirmData(null);
     setExecutionLoading(true);
     setExecutionError(null);
     setExecutionResult(null);
@@ -453,10 +497,7 @@ export default function CleanerPage() {
       const res = await fetch('/api/agent/execute-decisions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          previewId: decisionPreview.previewId,
-          selectedDecisionIds: safeSelectedDecisionIds,
-        }),
+        body: JSON.stringify({ previewId: decisionPreview.previewId, selectedDecisionIds: safeIds }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -464,22 +505,16 @@ export default function CleanerPage() {
         if (res.status === 403) {
           setNeedsUpgrade(true);
           setUpgradeMessage('Unlock bulk cleanup to apply all actions in one click');
-          setUpgradeRemainingCount(Math.max(0, safeSelectedDecisionIds.length - FREE_APPLY_LIMIT));
-          track('upgrade_shown', {
-            reason: '403',
-            remaining: Math.max(0, safeSelectedDecisionIds.length - FREE_APPLY_LIMIT),
-          });
+          setUpgradeRemainingCount(Math.max(0, safeIds.length - FREE_APPLY_LIMIT));
+          track('upgrade_shown', { reason: '403', remaining: Math.max(0, safeIds.length - FREE_APPLY_LIMIT) });
           return;
         }
         throw new Error(data?.error || 'Failed to execute decisions.');
       }
       setExecutionResult(data);
       setSelectedDecisionIds(new Set());
-      const cleanedCount =
-        (data?.applied?.delete ?? 0) +
-        (data?.applied?.archive ?? 0) +
-        (data?.applied?.keep ?? 0) +
-        (data?.applied?.reply ?? 0);
+      const cleanedCount = (data?.applied?.delete ?? 0) + (data?.applied?.archive ?? 0) +
+        (data?.applied?.keep ?? 0) + (data?.applied?.reply ?? 0);
       track('apply_success', { cleanedCount });
       log('Decision execution completed.');
     } catch (err: any) {
@@ -596,13 +631,13 @@ export default function CleanerPage() {
         body: JSON.stringify({ messageId: sender.sampleMessageId }),
       });
       if (!res.ok) {
-        log(`✕ Unsubscribe request failed for ${sender.email} (${res.status})`);
+        log(`✕ [unsub] Failed for ${sender.email} — emails will still be deleted`);
       } else {
         const data = await res.json();
-        if (data.method === 'one-click-post') log(`✓ Unsubscribed from ${sender.email} (one-click)`);
-        else if (data.method === 'mailto') log(`✓ Unsubscribe email sent to ${data.to}`);
-        else if (data.method === 'link') log(`→ Manual unsubscribe: ${data.url}`);
-        else log(`— No unsubscribe option for ${sender.email}`);
+        if (data.method === 'one-click-post') log(`✓ [unsub] ${sender.email} — one-click unsubscribe sent`);
+        else if (data.method === 'mailto') log(`✓ [unsub] ${sender.email} — unsubscribe email sent to ${data.to}`);
+        else if (data.method === 'link') log(`⚠ [unsub] ${sender.email} — manual step required: ${data.url}`);
+        else log(`— [unsub] ${sender.email} — no unsubscribe link found, deleting emails only`);
       }
     } catch {
       log(`✕ Unsubscribe failed for ${sender.email}`);
@@ -726,40 +761,93 @@ export default function CleanerPage() {
 
   return (
     <Shell gmailConnected={gmailConnected ?? false} onDisconnect={async () => { await fetch('/api/auth/disconnect', { method: 'POST' }); router.push('/'); }}>
-      <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: !gmailConnected ? 'rgba(0,217,126,0.15)' : 'transparent', color: !gmailConnected ? '#00d97e' : undefined }}>
-          1. Connect Gmail
-        </span>
-        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: gmailConnected && decisionPreview && !executionResult ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
-          2. Preview
-        </span>
-        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: executionResult ? 'rgba(74,222,128,0.2)' : 'transparent' }}>
-          3. Apply
-        </span>
-      </div>
+      {/* ── Progress Steps (P1 #4) ─────────────────────────────── */}
+      {(() => {
+        const step = !gmailConnected ? 1 : !executionResult ? 2 : 3;
+        const steps = [
+          { n: 1, label: 'Connect Gmail' },
+          { n: 2, label: 'Preview & Select' },
+          { n: 3, label: 'Clean' },
+        ];
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 20, maxWidth: 480 }}>
+            {steps.map((s, i) => {
+              const done = s.n < step;
+              const active = s.n === step;
+              return (
+                <div key={s.n} style={{ display: 'flex', alignItems: 'center', flex: s.n < steps.length ? 1 : 'unset' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontFamily: 'var(--font-space-mono)', fontWeight: 700,
+                      background: done ? '#00d97e' : active ? 'rgba(0,217,126,0.2)' : 'rgba(255,255,255,0.05)',
+                      border: active ? '2px solid #00d97e' : done ? 'none' : '1px solid rgba(255,255,255,0.2)',
+                      color: done ? '#06090f' : active ? '#00d97e' : 'rgba(255,255,255,0.4)',
+                    }}>
+                      {done ? '✓' : s.n}
+                    </div>
+                    <span style={{ fontSize: 10, letterSpacing: '0.08em', color: active ? '#00d97e' : done ? '#c8d8cc' : 'rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>
+                      {s.label}
+                    </span>
+                  </div>
+                  {i < steps.length - 1 && (
+                    <div style={{ flex: 1, height: 1, background: done ? '#00d97e' : 'rgba(255,255,255,0.12)', margin: '0 8px', marginBottom: 20 }} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {!gmailConnected && (
         <div style={{ marginBottom: 20, padding: '20px 24px', border: '1px solid rgba(0,217,126,0.35)', borderRadius: 8, background: 'rgba(0,217,126,0.05)' }}>
-          <p style={{ margin: '0 0 4px 0', fontSize: 11, letterSpacing: '0.15em', color: '#00d97e', fontFamily: 'var(--font-space-mono)' }}>// step_01</p>
-          <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 700 }}>Connect your Gmail to get started</h2>
-          <p style={{ margin: '0 0 16px 0', fontSize: 14, opacity: 0.75, maxWidth: 480 }}>
-            Grant read and modify access so the agent can scan senders, unsubscribe from lists, and bulk-delete emails.
+          <p style={{ margin: '0 0 4px 0', fontSize: 11, letterSpacing: '0.15em', color: '#00d97e', fontFamily: 'var(--font-space-mono)' }}>// step_01 — gmail_access</p>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 700 }}>Connect your Gmail inbox</h2>
+          <p style={{ margin: '0 0 6px 0', fontSize: 14, opacity: 0.85, maxWidth: 520 }}>
+            We need a second permission to <strong>read and manage your emails</strong>. This is separate from your account login — your login just identifies you, but inbox access requires explicit Gmail authorization.
+          </p>
+          <p style={{ margin: '0 0 16px 0', fontSize: 13, opacity: 0.6, maxWidth: 520 }}>
+            We only access emails to scan, unsubscribe, and delete on your behalf. Your credentials are never stored or shared.
           </p>
           <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
             <a href="/api/auth/gmail-connect" className={styles.btnPrimary} style={{ textDecoration: 'none' }}>
               CONNECT GMAIL →
             </a>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Read and modify emails</span>
-              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Tokens stored securely — never shared</span>
+              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Read &amp; modify emails (scan, delete, unsubscribe)</span>
+              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Tokens stored securely, never shared</span>
+              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Revoke access anytime from your Google account</span>
             </div>
           </div>
         </div>
       )}
 
       {executionResult && (
-        <div style={{ marginBottom: 12, color: '#4ade80', fontSize: 14, border: '1px solid rgba(74,222,128,0.5)', borderRadius: 8, padding: 10 }}>
-          Done! Cleaned {cleanedCount} emails
+        <div style={{ marginBottom: 20, padding: '24px 28px', border: '1px solid rgba(74,222,128,0.4)', borderRadius: 10, background: 'rgba(74,222,128,0.05)', textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
+          <h2 style={{ margin: '0 0 6px 0', fontSize: 22, fontWeight: 700, color: '#4ade80' }}>Inbox cleaned!</h2>
+          <p style={{ margin: '0 0 4px 0', fontSize: 15 }}>
+            Deleted <strong>{executionResult.applied.delete}</strong> · Archived <strong>{executionResult.applied.archive}</strong>
+            {executionResult.skipped > 0 && <span style={{ opacity: 0.7 }}> · Skipped {executionResult.skipped}</span>}
+          </p>
+          <p style={{ margin: '0 0 20px 0', fontSize: 13, opacity: 0.65 }}>
+            {cleanedCount} email{cleanedCount !== 1 ? 's' : ''} removed from your inbox
+          </p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button className={styles.btnPrimary} onClick={() => {
+              setExecutionResult(null);
+              setDecisionPreview(null);
+              setSelectedDecisionIds(new Set());
+              autoPreviewTriggeredRef.current = false;
+              void previewAIDecisions();
+            }}>
+              SCAN AGAIN
+            </button>
+            <button className={styles.btnOutline} onClick={() => setExecutionResult(null)}>
+              VIEW DETAILS
+            </button>
+          </div>
         </div>
       )}
 
@@ -807,17 +895,26 @@ export default function CleanerPage() {
       )}
 
       {previewError && (
-        <div style={{ marginTop: 12, color: '#ff6b6b', fontSize: 14 }}>
-          Decision preview error: {previewError}
+        <div style={{ marginTop: 12, color: '#ff6b6b', fontSize: 14, padding: '10px 14px', border: '1px solid rgba(255,107,107,0.3)', borderRadius: 6 }}>
+          {renderError(previewError)}
         </div>
       )}
 
       {decisionPreview && (
         <div style={{ marginTop: 16, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: 12 }}>
-          <h3 style={{ margin: '0 0 8px 0', fontSize: 16 }}>AI Decision Preview</h3>
-          {decisionPreview.previewId && (
-            <p style={{ margin: '0 0 8px 0', fontSize: 12, opacity: 0.8 }}>Preview ID: {decisionPreview.previewId}</p>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, fontSize: 16 }}>AI Decision Preview</h3>
+            {!isSubscribed && (
+              <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 999, background: 'rgba(255,184,28,0.12)', border: '1px solid rgba(255,184,28,0.35)', color: '#ffb81c', fontFamily: 'var(--font-space-mono)', letterSpacing: '0.05em' }}>
+                FREE · up to {FREE_APPLY_LIMIT} actions
+              </span>
+            )}
+            {isSubscribed && (
+              <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 999, background: 'rgba(0,217,126,0.1)', border: '1px solid rgba(0,217,126,0.3)', color: '#00d97e', fontFamily: 'var(--font-space-mono)' }}>
+                PRO · unlimited
+              </span>
+            )}
+          </div>
           <div style={{ marginBottom: 10 }}>
             <p style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
               Your inbox can be cleaned in seconds
@@ -837,7 +934,7 @@ export default function CleanerPage() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <button
               className={styles.btnPrimary}
-              onClick={applySelectedDecisions}
+              onClick={requestApply}
               disabled={!decisionPreview.previewId || selectedDecisionIds.size === 0 || executionLoading}
             >
               {executionLoading ? 'APPLYING...' : 'Apply Safe Actions'}
@@ -1002,8 +1099,8 @@ export default function CleanerPage() {
             );
           })()}
           {executionError && (
-            <p style={{ margin: '10px 0 0 0', color: '#ff6b6b', fontSize: 14 }}>
-              Execution error: {executionError}
+            <p style={{ margin: '10px 0 0 0', color: '#ff6b6b', fontSize: 14, padding: '8px 12px', border: '1px solid rgba(255,107,107,0.3)', borderRadius: 6 }}>
+              {renderError(executionError)}
             </p>
           )}
           {executionResult && (() => {
@@ -1138,6 +1235,54 @@ export default function CleanerPage() {
           onConfirm={() => runCategoryClean(confirmModal.senders, confirmModal.label)}
           onCancel={() => setConfirmModal(null)}
         />
+      )}
+
+      {/* Apply confirmation modal — P0 #2 */}
+      {applyConfirmData && (
+        <div className={styles.modalOverlay} onClick={() => setApplyConfirmData(null)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <p className={styles.modalTag}>// confirm_apply</p>
+            <h2 className={styles.modalTitle}>Review before applying</h2>
+            <p className={styles.modalSub}>
+              You are about to apply <strong>{applyConfirmData.total}</strong> action{applyConfirmData.total !== 1 ? 's' : ''}:
+            </p>
+            <ul style={{ margin: '8px 0 16px 0', paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
+              {applyConfirmData.deleteCount > 0 && (
+                <li><strong style={{ color: '#ff6b6b' }}>{applyConfirmData.deleteCount} delete{applyConfirmData.deleteCount !== 1 ? 's' : ''}</strong> — moved to Trash</li>
+              )}
+              {applyConfirmData.archiveCount > 0 && (
+                <li><strong style={{ color: '#ffb86c' }}>{applyConfirmData.archiveCount} archive{applyConfirmData.archiveCount !== 1 ? 's' : ''}</strong> — removed from inbox</li>
+              )}
+            </ul>
+            <div className={styles.modalWarning}>
+              ⚠ Deleted emails go to Trash and can be recovered for 30 days.
+            </div>
+            <div className={styles.modalActions}>
+              <button className={styles.modalCancel} onClick={() => setApplyConfirmData(null)}>CANCEL</button>
+              <button className={styles.modalConfirm} onClick={executeApproved}>CONFIRM &amp; APPLY</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome modal — P1 #5 */}
+      {showWelcome && (
+        <div className={styles.modalOverlay} onClick={() => setShowWelcome(false)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <p className={styles.modalTag}>// welcome</p>
+            <h2 className={styles.modalTitle}>Welcome to CleanInbox.ai</h2>
+            <p className={styles.modalSub}>Here is how it works in 3 steps:</p>
+            <ol style={{ margin: '8px 0 16px 0', paddingLeft: 20, fontSize: 14, lineHeight: 2 }}>
+              <li><strong style={{ color: '#00d97e' }}>Connect Gmail</strong> — grant inbox access (separate from your login)</li>
+              <li><strong style={{ color: '#00d97e' }}>Preview</strong> — AI scans emails older than 6 months and suggests safe actions</li>
+              <li><strong style={{ color: '#00d97e' }}>Clean</strong> — review and apply. Deletes go to Trash, recoverable for 30 days</li>
+            </ol>
+            <p style={{ margin: '0 0 16px 0', fontSize: 13, opacity: 0.7 }}>Free plan: up to 50 actions per session. Pro: unlimited.</p>
+            <div className={styles.modalActions}>
+              <button className={styles.modalConfirm} onClick={() => setShowWelcome(false)}>GET STARTED →</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <ActionLog entries={actionLog} />
