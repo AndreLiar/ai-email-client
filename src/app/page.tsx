@@ -581,7 +581,7 @@ export default function LandingPage() {
       <div className="lp-root">
         {/* ── Nav ── */}
         <nav className="lp-nav">
-          <Link href="/" className="lp-logo">clean<span>inbox</span>.ai</Link>
+          <Link href="/" className="lp-logo">get<span>cleaninbox</span>.xyz</Link>
           <Link href="/cleaner" className="lp-nav-cta">LAUNCH APP →</Link>
         </nav>
 
@@ -804,7 +804,7 @@ export default function LandingPage() {
         <footer className="lp-footer">
           <span className="lp-footer-copy">© 2026 CLEANINBOX.AI — POWERED BY GEMINI + VERCEL AI SDK</span>
           <Link href="/cleaner" className="lp-logo" style={{fontSize:'0.75rem'}}>
-            clean<span>inbox</span>.ai
+            get<span>cleaninbox</span>.xyz
           </Link>
         </footer>
       </div>

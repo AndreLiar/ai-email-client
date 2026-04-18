@@ -54,7 +54,7 @@ export default function SignUpPage() {
 
       <div className="auth-root">
         <Link href="/" className="auth-logo">
-          clean<span>inbox</span>.ai
+          get<span>cleaninbox</span>.xyz
         </Link>
         <p className="auth-tagline">// AI-powered Gmail cleaner</p>
 

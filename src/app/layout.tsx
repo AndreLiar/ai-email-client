@@ -20,7 +20,7 @@ const syne = Syne({
 });
 
 export const metadata = {
-  title: 'CleanInbox AI',
+  title: 'GetCleanInbox',
   description: 'AI-powered inbox cleaner. Bulk unsubscribe and delete newsletters in one click.',
 };
 
