@@ -6,6 +6,8 @@ import { runDecisionEngine } from '@/services/decisionEngine';
 import { createPreviewSession } from '@/services/decisionPreviewStore';
 import { saveDecisionPreview } from '@/services/storage';
 
+export const maxDuration = 60;
+
 const ALLOWED_QUERY_PATTERN = /^[a-zA-Z0-9:_\-\s.@]+$/;
 
 const requestSchema = z.object({
@@ -68,7 +70,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gmail not connected. Please reconnect.', reconnect: true }, { status: 403 });
     }
 
-    console.error('[decide] error:', err?.message || err);
+    const msg = err?.message || '';
+    console.error('[decide] error:', msg);
+    if (msg.includes('Invalid decision payload') || msg.includes('schema')) {
+      return NextResponse.json({ error: 'AI returned an unexpected response — please try again.' }, { status: 500 });
+    }
+    if (msg.includes('timeout') || msg.includes('AbortError')) {
+      return NextResponse.json({ error: 'AI response timed out — inbox may be too large. Try again.' }, { status: 504 });
+    }
     return NextResponse.json({ error: 'Failed to generate decisions' }, { status: 500 });
   }
 }

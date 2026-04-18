@@ -119,7 +119,7 @@ Respond ONLY with a JSON array like:
 }
 
 export async function classifyWithFallback(prompt: string): Promise<string> {
-  return generateTextWithFallback(prompt, 'classifySenders');
+  return generateTextWithFallback(prompt, 'classifySenders', 12000);
 }
 
 function extractJsonObject(text: string): unknown {
@@ -149,7 +149,7 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-async function generateTextWithFallback(prompt: string, context: string): Promise<string> {
+async function generateTextWithFallback(prompt: string, context: string, timeoutMs = 25000): Promise<string> {
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -157,7 +157,7 @@ async function generateTextWithFallback(prompt: string, context: string): Promis
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(timeoutMs),
       }
     );
     if (res.status === 429) throw new Error('rate_limit');
