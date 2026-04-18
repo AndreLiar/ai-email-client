@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 
 import type { SenderRow, ScanResult, SenderStatus, ScanLine } from './types';
@@ -84,7 +84,7 @@ const FREE_APPLY_LIMIT = 50;
 
 export default function CleanerPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+
   const { isLoaded, userId } = useAuth();
 
   // ── Auth ─────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export default function CleanerPage() {
 
   // Poll for subscription activation after Stripe redirect
   useEffect(() => {
-    if (searchParams.get('success') !== 'true') return;
+    if (new URLSearchParams(window.location.search).get('success') !== 'true') return;
     setPaymentPending(true);
     router.replace('/cleaner', { scroll: false });
     const deadline = Date.now() + 30_000;
