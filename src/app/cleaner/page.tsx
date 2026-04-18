@@ -12,7 +12,6 @@ import type { SenderRow, ScanResult, SenderStatus, ScanLine } from './types';
 import { PAGE_SIZE, priorityScore } from './utils';
 
 import Shell from './components/Shell';
-import ConnectGmail from './components/ConnectGmail';
 import ScanTerminal from './components/ScanTerminal';
 import ChatPanel from './components/ChatPanel';
 import AnalyticsReport from './components/AnalyticsReport';
@@ -712,7 +711,7 @@ export default function CleanerPage() {
   // ── Render ───────────────────────────────────────────────────────
   if (gmailConnected === null) {
     return (
-      <Shell onDisconnect={() => {}}>
+      <Shell onDisconnect={() => {}} gmailConnected={false}>
         <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'60vh' }}>
           <div style={{ textAlign:'center' }}>
             <div className={styles.spinner} />
@@ -723,18 +722,10 @@ export default function CleanerPage() {
     );
   }
 
-  if (!gmailConnected) {
-    return (
-      <Shell onDisconnect={() => {}}>
-        <ConnectGmail />
-      </Shell>
-    );
-  }
-
   return (
-    <Shell onDisconnect={async () => { await fetch('/api/auth/disconnect', { method: 'POST' }); router.push('/'); }}>
+    <Shell gmailConnected={gmailConnected ?? false} onDisconnect={async () => { await fetch('/api/auth/disconnect', { method: 'POST' }); router.push('/'); }}>
       <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: !gmailConnected ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
+        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: !gmailConnected ? 'rgba(0,217,126,0.15)' : 'transparent', color: !gmailConnected ? '#00d97e' : undefined }}>
           1. Connect Gmail
         </span>
         <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: gmailConnected && decisionPreview && !executionResult ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
@@ -744,6 +735,25 @@ export default function CleanerPage() {
           3. Apply
         </span>
       </div>
+
+      {!gmailConnected && (
+        <div style={{ marginBottom: 20, padding: '20px 24px', border: '1px solid rgba(0,217,126,0.35)', borderRadius: 8, background: 'rgba(0,217,126,0.05)' }}>
+          <p style={{ margin: '0 0 4px 0', fontSize: 11, letterSpacing: '0.15em', color: '#00d97e', fontFamily: 'var(--font-space-mono)' }}>// step_01</p>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 700 }}>Connect your Gmail to get started</h2>
+          <p style={{ margin: '0 0 16px 0', fontSize: 14, opacity: 0.75, maxWidth: 480 }}>
+            Grant read and modify access so the agent can scan senders, unsubscribe from lists, and bulk-delete emails.
+          </p>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <a href="/api/auth/gmail-connect" className={styles.btnPrimary} style={{ textDecoration: 'none' }}>
+              CONNECT GMAIL →
+            </a>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Read and modify emails</span>
+              <span style={{ fontSize: 12, opacity: 0.6 }}>✓ Tokens stored securely — never shared</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {executionResult && (
         <div style={{ marginBottom: 12, color: '#4ade80', fontSize: 14, border: '1px solid rgba(74,222,128,0.5)', borderRadius: 8, padding: 10 }}>
@@ -767,13 +777,13 @@ export default function CleanerPage() {
           <button className={styles.btnOutline} onClick={() => setShowChat(v => !v)}>
             {showChat ? 'HIDE AGENT' : '✦ ASK AI AGENT'}
           </button>
-          <button className={styles.btnOutline} onClick={previewAIDecisions} disabled={previewLoading || scanning}>
+          <button className={styles.btnOutline} onClick={previewAIDecisions} disabled={!gmailConnected || previewLoading || scanning}>
             {previewLoading ? 'GENERATING...' : 'Generate My Cleanup Plan'}
           </button>
-          <button className={styles.btnOutline} onClick={viewHistory} disabled={historyLoading}>
+          <button className={styles.btnOutline} onClick={viewHistory} disabled={!gmailConnected || historyLoading}>
             {historyLoading ? 'LOADING HISTORY...' : 'View History'}
           </button>
-          <button className={styles.btnPrimary} onClick={scanInbox} disabled={scanning}>
+          <button className={styles.btnPrimary} onClick={scanInbox} disabled={!gmailConnected || scanning}>
             {scanning ? 'SCANNING...' : 'SCAN INBOX'}
           </button>
         </div>

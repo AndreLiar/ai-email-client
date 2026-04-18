@@ -7,9 +7,10 @@ import styles from '../cleaner.module.css';
 interface ShellProps {
   children: React.ReactNode;
   onDisconnect: () => void;
+  gmailConnected?: boolean;
 }
 
-export default function Shell({ children, onDisconnect }: ShellProps) {
+export default function Shell({ children, onDisconnect, gmailConnected }: ShellProps) {
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
 
   return (
@@ -19,20 +20,22 @@ export default function Shell({ children, onDisconnect }: ShellProps) {
           clean<span>inbox</span>.ai
         </Link>
         <div className={styles.navActions}>
-          {confirmingDisconnect ? (
-            <>
-              <span style={{ fontSize: 13, opacity: 0.85 }}>Disconnect Gmail?</span>
-              <button className={styles.btnGhost} onClick={() => { setConfirmingDisconnect(false); onDisconnect(); }}>
-                YES
+          {gmailConnected && (
+            confirmingDisconnect ? (
+              <>
+                <span style={{ fontSize: 13, opacity: 0.85 }}>Disconnect Gmail?</span>
+                <button className={styles.btnGhost} onClick={() => { setConfirmingDisconnect(false); onDisconnect(); }}>
+                  YES
+                </button>
+                <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(false)}>
+                  CANCEL
+                </button>
+              </>
+            ) : (
+              <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(true)}>
+                DISCONNECT GMAIL
               </button>
-              <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(false)}>
-                CANCEL
-              </button>
-            </>
-          ) : (
-            <button className={styles.btnGhost} onClick={() => setConfirmingDisconnect(true)}>
-              DISCONNECT GMAIL
-            </button>
+            )
           )}
         </div>
       </nav>
