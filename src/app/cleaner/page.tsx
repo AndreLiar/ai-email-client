@@ -21,6 +21,7 @@ import SenderTable from './components/SenderTable';
 import ConfirmModal from './components/ConfirmModal';
 import ActionLog from './components/ActionLog';
 import styles from './cleaner.module.css';
+import { track } from '@/lib/analytics';
 
 type PreviewDecisionAction = 'delete' | 'archive' | 'keep' | 'reply';
 
@@ -77,6 +78,8 @@ interface HistoryRecordData {
   executedAt: number;
 }
 
+const FREE_APPLY_LIMIT = 50;
+
 export default function CleanerPage() {
   const router = useRouter();
   const { isLoaded, userId } = useAuth();
@@ -92,6 +95,12 @@ export default function CleanerPage() {
   useEffect(() => {
     fetch('/api/auth/status').then(r => r.json()).then(d => setGmailConnected(d.connected));
   }, []);
+  useEffect(() => {
+    if (!gmailConnected) return;
+    if (gmailConnectedTrackedRef.current) return;
+    gmailConnectedTrackedRef.current = true;
+    track('gmail_connected');
+  }, [gmailConnected]);
 
   // ── Scan state ───────────────────────────────────────────────────
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
@@ -107,6 +116,8 @@ export default function CleanerPage() {
   const [executionResult, setExecutionResult] = useState<ExecutionResultData | null>(null);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
+  const [upgradeMessage, setUpgradeMessage] = useState('Unlock bulk cleanup to apply all actions in one click');
+  const [upgradeRemainingCount, setUpgradeRemainingCount] = useState(0);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -131,6 +142,9 @@ export default function CleanerPage() {
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
+  const autoPreviewTriggeredRef = useRef(false);
+  const gmailConnectedTrackedRef = useRef(false);
+  const previewTrackedRef = useRef<string | null>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
@@ -322,40 +336,86 @@ export default function CleanerPage() {
     }
   };
 
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+    if (!gmailConnected) return;
+    if (autoPreviewTriggeredRef.current) return;
+    if (decisionPreview || previewLoading || scanning) return;
+
+    autoPreviewTriggeredRef.current = true;
+    void previewAIDecisions();
+  }, [decisionPreview, gmailConnected, isLoaded, previewLoading, scanning, userId]);
+
+  useEffect(() => {
+    if (!decisionPreview) return;
+    const previewKey = decisionPreview.previewId ?? '__no_preview_id__';
+    if (previewTrackedRef.current === previewKey) return;
+    previewTrackedRef.current = previewKey;
+    track('preview_generated', { count: decisionPreview.decisions.length });
+  }, [decisionPreview]);
+
   const applySelectedDecisions = async () => {
     if (!decisionPreview?.previewId || selectedDecisionIds.size === 0) return;
     const selected = decisionPreview.decisions.filter(decision =>
       selectedDecisionIds.has(getDecisionId(decision))
     );
-    const deleteCount = selected.filter(d => d.action === 'delete').length;
-    const archiveCount = selected.filter(d => d.action === 'archive').length;
-    const confirmed = window.confirm(
-      `Apply ${selected.length} selected decisions?\n\nDelete actions: ${deleteCount}\nArchive actions: ${archiveCount}`
-    );
-    if (!confirmed) return;
+    const safeSelectedDecisionIds = selected
+      .filter(decision => isEligibleDecision(decision))
+      .map(decision => getDecisionId(decision))
+      .filter((id: string): id is string => Boolean(id));
+    track('apply_safe_clicked', { selectedCount: safeSelectedDecisionIds.length });
+    if (safeSelectedDecisionIds.length === 0) {
+      setExecutionError('No safe actions selected to apply.');
+      return;
+    }
+    if (safeSelectedDecisionIds.length > FREE_APPLY_LIMIT) {
+      setNeedsUpgrade(true);
+      setUpgradeMessage('Free plan allows up to 50 emails. Upgrade to clean everything at once.');
+      setUpgradeRemainingCount(safeSelectedDecisionIds.length - FREE_APPLY_LIMIT);
+      track('upgrade_shown', {
+        reason: 'quota',
+        remaining: safeSelectedDecisionIds.length - FREE_APPLY_LIMIT,
+      });
+      return;
+    }
 
     setExecutionLoading(true);
     setExecutionError(null);
     setExecutionResult(null);
     setNeedsUpgrade(false);
+    setUpgradeRemainingCount(0);
+    setUpgradeMessage('Unlock bulk cleanup to apply all actions in one click');
     try {
       const res = await fetch('/api/agent/execute-decisions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           previewId: decisionPreview.previewId,
-          selectedDecisionIds: Array.from(selectedDecisionIds),
+          selectedDecisionIds: safeSelectedDecisionIds,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 403) {
           setNeedsUpgrade(true);
-          throw new Error('Upgrade required to execute actions');
+          setUpgradeMessage('Unlock bulk cleanup to apply all actions in one click');
+          setUpgradeRemainingCount(Math.max(0, safeSelectedDecisionIds.length - FREE_APPLY_LIMIT));
+          track('upgrade_shown', {
+            reason: '403',
+            remaining: Math.max(0, safeSelectedDecisionIds.length - FREE_APPLY_LIMIT),
+          });
+          return;
         }
         throw new Error(data?.error || 'Failed to execute decisions.');
       }
       setExecutionResult(data);
+      setSelectedDecisionIds(new Set());
+      const cleanedCount =
+        (data?.applied?.delete ?? 0) +
+        (data?.applied?.archive ?? 0) +
+        (data?.applied?.keep ?? 0) +
+        (data?.applied?.reply ?? 0);
+      track('apply_success', { cleanedCount });
       log('Decision execution completed.');
     } catch (err: any) {
       const message = err?.message || 'Failed to execute decisions.';
@@ -367,6 +427,7 @@ export default function CleanerPage() {
   };
 
   const startCheckoutUpgrade = async () => {
+    track('upgrade_clicked');
     setUpgradeLoading(true);
     try {
       const res = await fetch('/api/stripe/checkout', { method: 'POST' });
@@ -559,6 +620,12 @@ export default function CleanerPage() {
   const autoCount = scanResult?.senders.filter(
     s => s.canAutoUnsubscribe && (senderStatuses[s.email] || 'idle') === 'idle'
   ).length ?? 0;
+  const cleanedCount = executionResult
+    ? executionResult.applied.delete + executionResult.applied.archive
+    : 0;
+  const safeNowCount = decisionPreview
+    ? decisionPreview.decisions.filter(decision => isEligibleDecision(decision)).length
+    : 0;
 
   // ── Render ───────────────────────────────────────────────────────
   if (gmailConnected === null) {
@@ -584,6 +651,24 @@ export default function CleanerPage() {
 
   return (
     <Shell onDisconnect={async () => { await fetch('/api/auth/disconnect', { method: 'POST' }); router.push('/'); }}>
+      <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: !gmailConnected ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
+          1. Connect Gmail
+        </span>
+        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: gmailConnected && decisionPreview && !executionResult ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
+          2. Preview
+        </span>
+        <span style={{ fontSize: 13, padding: '4px 8px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: executionResult ? 'rgba(74,222,128,0.2)' : 'transparent' }}>
+          3. Apply
+        </span>
+      </div>
+
+      {executionResult && (
+        <div style={{ marginBottom: 12, color: '#4ade80', fontSize: 14, border: '1px solid rgba(74,222,128,0.5)', borderRadius: 8, padding: 10 }}>
+          Done! Cleaned {cleanedCount} emails
+        </div>
+      )}
+
       {/* Page header */}
       <div className={styles.pageHeader}>
         <div>
@@ -601,7 +686,7 @@ export default function CleanerPage() {
             {showChat ? 'HIDE AGENT' : '✦ ASK AI AGENT'}
           </button>
           <button className={styles.btnOutline} onClick={previewAIDecisions} disabled={previewLoading || scanning}>
-            {previewLoading ? 'PREVIEWING...' : 'Preview AI Decisions'}
+            {previewLoading ? 'GENERATING...' : 'Generate My Cleanup Plan'}
           </button>
           <button className={styles.btnOutline} onClick={viewHistory} disabled={historyLoading}>
             {historyLoading ? 'LOADING HISTORY...' : 'View History'}
@@ -613,6 +698,13 @@ export default function CleanerPage() {
       </div>
 
       <ScanTerminal scanLines={scanLines} scanning={scanning} classifying={classifying} />
+
+      {previewLoading && (
+        <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>
+          <p style={{ margin: 0 }}>Analyzing your inbox...</p>
+          <p style={{ margin: '4px 0 0 0' }}>Grouping senders and finding safe actions...</p>
+        </div>
+      )}
 
       {previewError && (
         <div style={{ marginTop: 12, color: '#ff6b6b', fontSize: 14 }}>
@@ -626,7 +718,30 @@ export default function CleanerPage() {
           {decisionPreview.previewId && (
             <p style={{ margin: '0 0 8px 0', fontSize: 12, opacity: 0.8 }}>Preview ID: {decisionPreview.previewId}</p>
           )}
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+              Your inbox can be cleaned in seconds
+            </p>
+            <p style={{ margin: '4px 0 0 0', fontSize: 14, opacity: 0.9 }}>
+              We found {safeNowCount} emails you can safely clean right now
+            </p>
+          </div>
+          <div style={{ marginBottom: 10, padding: 10, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8 }}>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              Total decisions: {decisionPreview.decisions.length}
+            </p>
+            <p style={{ margin: '4px 0 0 0', fontSize: 14 }}>
+              Delete: {decisionPreview.summary.delete} · Archive: {decisionPreview.summary.archive} · Keep: {decisionPreview.summary.keep} · Reply: {decisionPreview.summary.reply}
+            </p>
+          </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button
+              className={styles.btnPrimary}
+              onClick={applySelectedDecisions}
+              disabled={!decisionPreview.previewId || selectedDecisionIds.size === 0 || executionLoading}
+            >
+              {executionLoading ? 'APPLYING...' : 'Apply Safe Actions'}
+            </button>
             <button
               className={styles.btnOutline}
               onClick={() => {
@@ -644,26 +759,44 @@ export default function CleanerPage() {
             <button className={styles.btnOutline} onClick={() => setSelectedDecisionIds(new Set())}>
               Clear selection
             </button>
-            <button
-              className={styles.btnPrimary}
-              onClick={applySelectedDecisions}
-              disabled={!decisionPreview.previewId || selectedDecisionIds.size === 0 || executionLoading}
-            >
-              {executionLoading ? 'APPLYING...' : 'Apply Selected Decisions'}
-            </button>
             <span style={{ alignSelf: 'center', fontSize: 13 }}>
               Selected: {selectedDecisionIds.size}
             </span>
           </div>
-          <p style={{ margin: '0 0 8px 0', fontSize: 14 }}>
-            Summary: delete {decisionPreview.summary.delete} · archive {decisionPreview.summary.archive} · keep {decisionPreview.summary.keep} · reply {decisionPreview.summary.reply}
-          </p>
+          <div style={{ marginBottom: 8, fontSize: 13, opacity: 0.9 }}>
+            <p style={{ margin: 0 }}>Nothing is deleted without your approval</p>
+            <p style={{ margin: '4px 0 0 0' }}>You can review every action before applying</p>
+          </div>
+          {needsUpgrade && (
+            <div style={{ marginTop: 8, marginBottom: 8 }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: 16, fontWeight: 700 }}>
+                Finish cleaning your inbox
+              </p>
+              <p style={{ margin: '0 0 8px 0', fontSize: 14 }}>
+                You've already cleaned part of your inbox. Upgrade to apply all remaining actions in one click.
+              </p>
+              <button
+                className={styles.btnPrimary}
+                onClick={startCheckoutUpgrade}
+                disabled={upgradeLoading}
+              >
+                {upgradeLoading ? 'REDIRECTING...' : 'Upgrade to clean everything'}
+              </button>
+            </div>
+          )}
           {decisionPreview.dropped > 0 && (
             <p style={{ margin: '0 0 8px 0', fontSize: 14, color: '#ffb86c' }}>
               Dropped: {decisionPreview.dropped}
             </p>
           )}
-          {(() => {
+          {decisionPreview.decisions.length === 0 ? (
+            <div style={{ marginTop: 10, fontSize: 14 }}>
+              <p style={{ margin: 0 }}>Your inbox is already clean 🎉</p>
+              <p style={{ margin: '4px 0 0 0', opacity: 0.9 }}>
+                We'll notify you when new cleanup opportunities appear
+              </p>
+            </div>
+          ) : (() => {
             const eligible = decisionPreview.decisions.filter(d => !isBlockedReason(d.reason) && !isErrorReason(d.reason));
             const blocked = decisionPreview.decisions.filter(d => isBlockedReason(d.reason));
             const errors = decisionPreview.decisions.filter(d => isErrorReason(d.reason));
@@ -747,17 +880,6 @@ export default function CleanerPage() {
             <p style={{ margin: '10px 0 0 0', color: '#ff6b6b', fontSize: 14 }}>
               Execution error: {executionError}
             </p>
-          )}
-          {needsUpgrade && (
-            <div style={{ marginTop: 8 }}>
-              <button
-                className={styles.btnPrimary}
-                onClick={startCheckoutUpgrade}
-                disabled={upgradeLoading}
-              >
-                {upgradeLoading ? 'REDIRECTING...' : 'Upgrade'}
-              </button>
-            </div>
           )}
           {executionResult && (
             <p style={{ margin: '10px 0 0 0', fontSize: 14 }}>

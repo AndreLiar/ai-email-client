@@ -1,6 +1,13 @@
+'use client';
+
 import Link from 'next/link';
+import { track } from '@/lib/analytics';
 
 export default function LandingPage() {
+  const handleConnectCtaClick = () => {
+    track('cta_connect_clicked');
+  };
+
   return (
     <>
       <style>{`
@@ -113,6 +120,18 @@ export default function LandingPage() {
           display: flex;
           gap: 1rem;
           flex-wrap: wrap;
+        }
+        .lp-trust-list {
+          margin-top: 1rem;
+          display: grid;
+          gap: 0.35rem;
+          color: #7a9a84;
+          font-size: 0.9rem;
+        }
+        .lp-social-proof {
+          margin-top: 1rem;
+          color: #9db8a4;
+          font-size: 0.9rem;
         }
         .lp-btn-primary {
           font-family: var(--font-space-mono), monospace;
@@ -450,16 +469,23 @@ export default function LandingPage() {
           <div className="lp-hero-content">
             <p className="lp-eyebrow">Powered by Gemini AI</p>
             <h1 className="lp-h1">
-              Your inbox.<br />
-              <em>Finally clean.</em>
+              Clean your Gmail inbox in seconds with <em>AI</em>
             </h1>
             <p className="lp-sub">
-              An AI agent that scans your Gmail, identifies every newsletter and
-              promo sender, then unsubscribes and deletes them — in one click.
+              Automatically find and remove unwanted emails, unsubscribe in bulk,
+              and take control of your inbox.
             </p>
             <div className="lp-cta-row">
-              <Link href="/cleaner" className="lp-btn-primary">GET STARTED FREE</Link>
-              <Link href="/cleaner" className="lp-btn-ghost">CONNECT GMAIL</Link>
+              <Link href="/cleaner" className="lp-btn-primary" onClick={handleConnectCtaClick}>
+                Connect Gmail &amp; See My Cleanup Plan
+              </Link>
+            </div>
+            <div className="lp-social-proof">
+              Used by early users to clean thousands of emails
+            </div>
+            <div className="lp-trust-list">
+              <span>Secure Google OAuth</span>
+              <span>No emails are deleted without your approval</span>
             </div>
           </div>
 
@@ -559,17 +585,17 @@ export default function LandingPage() {
               {
                 n: '01',
                 title: 'Connect Gmail',
-                text: 'Authorise read + modify access via Google OAuth. Your emails never leave your account.',
+                text: 'Securely connect your Gmail account with Google OAuth.',
               },
               {
                 n: '02',
-                title: 'Scan & Review',
-                text: 'The agent scans 300 emails, groups senders by volume, and flags which can be auto-unsubscribed.',
+                title: 'Review AI cleanup plan',
+                text: 'See what can be safely archived, deleted, kept, or reviewed.',
               },
               {
                 n: '03',
-                title: 'Clean & Done',
-                text: 'Select the senders you want gone. One click unsubscribes and moves all their emails to Trash.',
+                title: 'Clean your inbox in one click',
+                text: 'Apply safe actions and clear inbox clutter in seconds.',
               },
             ].map(({ n, title, text }) => (
               <div className="lp-step" key={n}>
@@ -587,9 +613,14 @@ export default function LandingPage() {
           <p className="lp-cta-sub">
             Connect your Gmail and let the agent handle the rest.
           </p>
-          <Link href="/cleaner" className="lp-btn-primary">
-            START CLEANING →
-          </Link>
+          <div className="lp-cta-row" style={{ justifyContent: 'center' }}>
+            <Link href="/cleaner" className="lp-btn-primary" onClick={handleConnectCtaClick}>
+              Connect Gmail &amp; See My Cleanup Plan
+            </Link>
+            <Link href="/cleaner" className="lp-btn-ghost">
+              Try it free
+            </Link>
+          </div>
         </div>
 
         {/* ── Footer ── */}

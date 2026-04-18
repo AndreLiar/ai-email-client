@@ -3,6 +3,7 @@ import './globals.css';
 import { ReactNode } from 'react';
 import { Space_Mono, Syne } from 'next/font/google';
 import { ClerkProvider } from '@clerk/nextjs';
+import { Analytics } from '@vercel/analytics/react';
 
 const spaceMono = Space_Mono({
   weight: ['400', '700'],
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body suppressHydrationWarning={true}>
         <ClerkProvider>
           {children}
+          <Analytics />
         </ClerkProvider>
       </body>
     </html>
