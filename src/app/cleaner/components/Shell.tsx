@@ -17,7 +17,7 @@ export default function Shell({ children, onDisconnect, gmailConnected }: ShellP
     <div className={styles.root}>
       <nav className={styles.nav}>
         <Link href="/" className={styles.logo}>
-          clean<span>inbox</span>.ai
+          get<span>cleaninbox</span>.xyz
         </Link>
         <div className={styles.navActions}>
           {gmailConnected && (

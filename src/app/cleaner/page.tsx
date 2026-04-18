@@ -1270,7 +1270,7 @@ export default function CleanerPage() {
         <div className={styles.modalOverlay} onClick={() => setShowWelcome(false)}>
           <div className={styles.modal} onClick={e => e.stopPropagation()}>
             <p className={styles.modalTag}>// welcome</p>
-            <h2 className={styles.modalTitle}>Welcome to CleanInbox.ai</h2>
+            <h2 className={styles.modalTitle}>Welcome to GetCleanInbox</h2>
             <p className={styles.modalSub}>Here is how it works in 3 steps:</p>
             <ol style={{ margin: '8px 0 16px 0', paddingLeft: 20, fontSize: 14, lineHeight: 2 }}>
               <li><strong style={{ color: '#00d97e' }}>Connect Gmail</strong> — grant inbox access (separate from your login)</li>
