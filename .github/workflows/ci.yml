@@ -7,22 +7,77 @@ on:
       - main
 
 jobs:
-  lint-and-typecheck:
-    name: Lint & Type Check
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+      - run: npm ci
+      - run: npm run lint
 
-      - name: Install dependencies
-        run: npm ci
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
 
-      - name: Lint
-        run: npm run lint
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values — build must succeed without real secrets
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
 
-      - name: Type check
-        run: npx tsc --noEmit
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+
+  db-check:
+    name: DB Migration Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Check for uncommitted migrations
+        run: |
+          npx drizzle-kit generate --config=drizzle.config.ts 2>&1 || true
+          if [[ -n "$(git status --porcelain drizzle/)" ]]; then
+            echo "❌ Uncommitted Drizzle migrations detected. Run 'npm run db:generate' and commit the output."
+            git diff --name-only drizzle/
+            exit 1
+          else
+            echo "✅ Migrations are up to date."
+          fi
