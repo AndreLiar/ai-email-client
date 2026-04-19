@@ -9,10 +9,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/sign-in', req.url));
   }
 
-  const code = new URL(req.url).searchParams.get('code');
+  const searchParams = new URL(req.url).searchParams;
+  const code = searchParams.get('code');
+  const returnedState = searchParams.get('state');
+  const storedState = req.cookies.get('gmail_oauth_state')?.value;
 
   if (!code) {
     return NextResponse.redirect(new URL('/cleaner?error=no_code', req.url));
+  }
+
+  if (!storedState || returnedState !== storedState) {
+    return NextResponse.redirect(new URL('/cleaner?error=invalid_state', req.url));
   }
 
   const tokens = await exchangeCodeForTokens(code);
@@ -29,5 +36,7 @@ export async function GET(req: NextRequest) {
   });
 
   console.log('Gmail tokens stored for Clerk user.');
-  return NextResponse.redirect(new URL('/cleaner', req.url));
+  const redirect = NextResponse.redirect(new URL('/cleaner', req.url));
+  redirect.cookies.delete('gmail_oauth_state');
+  return redirect;
 }
