@@ -1,0 +1,82 @@
+name: Production Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  env-check:
+    name: Verify Production Env Vars
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required Vercel production env vars
+        run: |
+          REQUIRED=(
+            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
+            "CLERK_SECRET_KEY"
+            "GOOGLE_CLIENT_ID"
+            "GOOGLE_CLIENT_SECRET"
+            "GOOGLE_REDIRECT_URI"
+            "GEMINI_API_KEY"
+            "STRIPE_SECRET_KEY"
+            "STRIPE_WEBHOOK_SECRET"
+            "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"
+            "DATABASE_URL"
+          )
+
+          if [[ -z "$VERCEL_TOKEN" ]]; then
+            echo "⚠️  VERCEL_TOKEN secret not set — skipping env check"
+            exit 0
+          fi
+
+          ENDPOINT="https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env"
+          if [[ -n "$VERCEL_TEAM_ID" ]]; then
+            ENDPOINT="$ENDPOINT?teamId=$VERCEL_TEAM_ID"
+          fi
+
+          RESPONSE=$(curl -s -H "Authorization: Bearer $VERCEL_TOKEN" "$ENDPOINT")
+          MISSING=()
+
+          for VAR in "${REQUIRED[@]}"; do
+            FOUND=$(echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          envs = data.get('envs', [])
+          match = [e for e in envs if e['key'] == '$VAR' and 'production' in e.get('target', [])]
+          print('yes' if match else 'no')
+          " 2>/dev/null)
+            if [[ "$FOUND" != "yes" ]]; then
+              MISSING+=("$VAR")
+            fi
+          done
+
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "❌ Missing production env vars:"
+            printf '  - %s\n' "${MISSING[@]}"
+            exit 1
+          else
+            echo "✅ All required production env vars are present."
+          fi
+
+  e2e-smoke:
+    name: E2E Smoke Test (staging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Run smoke tests against staging
+        run: npx playwright test e2e/smoke.test.ts --project=chromium
+        env:
+          BASE_URL: https://ai-email-client-git-staging-andreliars-projects.vercel.app
