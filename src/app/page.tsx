@@ -802,10 +802,14 @@ export default function LandingPage() {
 
         {/* ── Footer ── */}
         <footer className="lp-footer">
-          <span className="lp-footer-copy">© 2026 CLEANINBOX.AI — POWERED BY GEMINI + VERCEL AI SDK</span>
-          <Link href="/cleaner" className="lp-logo" style={{fontSize:'0.75rem'}}>
-            get<span>cleaninbox</span>.xyz
-          </Link>
+          <span className="lp-footer-copy">© 2026 GETCLEANINBOX — POWERED BY GEMINI + VERCEL AI SDK</span>
+          <div style={{display:'flex',gap:'1.5rem',alignItems:'center'}}>
+            <Link href="/privacy" className="lp-footer-copy" style={{color:'#4a6a54',textDecoration:'none'}}>Privacy Policy</Link>
+            <Link href="/terms" className="lp-footer-copy" style={{color:'#4a6a54',textDecoration:'none'}}>Terms</Link>
+            <Link href="/cleaner" className="lp-logo" style={{fontSize:'0.75rem'}}>
+              get<span>cleaninbox</span>.xyz
+            </Link>
+          </div>
         </footer>
       </div>
     </>
