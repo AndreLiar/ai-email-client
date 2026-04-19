@@ -40,6 +40,15 @@ jobs:
       NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
       NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+      CLERK_SECRET_KEY: sk_test_dummy
+      GOOGLE_CLIENT_ID: dummy
+      GOOGLE_CLIENT_SECRET: dummy
+      GOOGLE_REDIRECT_URI: http://localhost:3000/api/oauth2callback
+      GEMINI_API_KEY: dummy
+      GROQ_API_KEY: dummy
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_WEBHOOK_SECRET: whsec_dummy
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
