@@ -30,8 +30,11 @@ export async function GET(req: NextRequest) {
   const tokens = await exchangeCodeForTokens(code, codeVerifier);
 
   if (!tokens.access_token) {
-    console.error('Failed to get Gmail token:', tokens);
-    return NextResponse.redirect(new URL('/cleaner?error=gmail_token', req.url));
+    console.error('Failed to get Gmail token - full response:', JSON.stringify(tokens));
+    console.error('redirect_uri used:', process.env.GOOGLE_REDIRECT_URI);
+    console.error('code_verifier present:', !!codeVerifier, 'length:', codeVerifier?.length);
+    const errMsg = (tokens as { error?: string }).error ?? 'unknown';
+    return NextResponse.redirect(new URL(`/cleaner?error=gmail_token&detail=${errMsg}`, req.url));
   }
 
   await saveGmailTokens(userId, {

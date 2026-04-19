@@ -1,0 +1,41 @@
+name: Post-Deploy Healthcheck
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  healthcheck:
+    name: Production Healthcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Vercel deployment to settle
+        run: sleep 60
+
+      - name: Check homepage
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://getcleaninbox.xyz)
+          if [[ "$STATUS" != "200" ]]; then
+            echo "❌ Homepage returned HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ Homepage OK (HTTP $STATUS)"
+
+      - name: Check sign-in page
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://getcleaninbox.xyz/sign-in)
+          if [[ "$STATUS" != "200" ]]; then
+            echo "❌ /sign-in returned HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ /sign-in OK (HTTP $STATUS)"
+
+      - name: Check privacy page
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://getcleaninbox.xyz/privacy)
+          if [[ "$STATUS" != "200" ]]; then
+            echo "❌ /privacy returned HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ /privacy OK (HTTP $STATUS)"
