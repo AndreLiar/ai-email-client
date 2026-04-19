@@ -51,7 +51,14 @@ export async function isGmailConnected(userId: string): Promise<boolean> {
   return !!tokenRecord?.accessToken;
 }
 
-export function buildGmailAuthUrl(state: string): string {
+export async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
+  const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = Buffer.from(digest).toString('base64url');
+  return { verifier, challenge };
+}
+
+export function buildGmailAuthUrl(state: string, codeChallenge: string): string {
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID!,
     redirect_uri: process.env.GOOGLE_REDIRECT_URI!,
@@ -63,12 +70,15 @@ export function buildGmailAuthUrl(state: string): string {
     access_type: 'offline',
     prompt: 'consent',
     state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
 export async function exchangeCodeForTokens(
-  code: string
+  code: string,
+  codeVerifier: string
 ): Promise<{ access_token: string; refresh_token?: string }> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -79,6 +89,7 @@ export async function exchangeCodeForTokens(
       client_secret: process.env.GOOGLE_CLIENT_SECRET!,
       redirect_uri: process.env.GOOGLE_REDIRECT_URI!,
       grant_type: 'authorization_code',
+      code_verifier: codeVerifier,
     }),
   });
   return res.json();
