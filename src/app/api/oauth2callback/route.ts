@@ -22,7 +22,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/cleaner?error=invalid_state', req.url));
   }
 
-  const tokens = await exchangeCodeForTokens(code);
+  const codeVerifier = req.cookies.get('gmail_pkce_verifier')?.value;
+  if (!codeVerifier) {
+    return NextResponse.redirect(new URL('/cleaner?error=missing_verifier', req.url));
+  }
+
+  const tokens = await exchangeCodeForTokens(code, codeVerifier);
 
   if (!tokens.access_token) {
     console.error('Failed to get Gmail token:', tokens);
@@ -38,5 +43,6 @@ export async function GET(req: NextRequest) {
   console.log('Gmail tokens stored for Clerk user.');
   const redirect = NextResponse.redirect(new URL('/cleaner', req.url));
   redirect.cookies.delete('gmail_oauth_state');
+  redirect.cookies.delete('gmail_pkce_verifier');
   return redirect;
 }
