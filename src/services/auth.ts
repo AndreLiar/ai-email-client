@@ -51,7 +51,7 @@ export async function isGmailConnected(userId: string): Promise<boolean> {
   return !!tokenRecord?.accessToken;
 }
 
-export function buildGmailAuthUrl(): string {
+export function buildGmailAuthUrl(state: string): string {
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID!,
     redirect_uri: process.env.GOOGLE_REDIRECT_URI!,
@@ -62,6 +62,7 @@ export function buildGmailAuthUrl(): string {
     ].join(' '),
     access_type: 'offline',
     prompt: 'consent',
+    state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
