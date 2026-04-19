@@ -2,6 +2,8 @@ export const metadata = {
   title: 'Privacy Policy — GetCleanInbox',
 };
 
+import Link from 'next/link';
+
 export default function PrivacyPage() {
   return (
     <>
@@ -64,7 +66,7 @@ export default function PrivacyPage() {
 
       <div className="legal-root">
         <div className="legal-wrap">
-          <a href="/" className="legal-logo">get<span>cleaninbox</span>.xyz</a>
+          <Link href="/" className="legal-logo">get<span>cleaninbox</span>.xyz</Link>
 
           <h1>Privacy Policy</h1>
           <p className="legal-date">Last updated: April 19, 2026</p>
