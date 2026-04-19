@@ -10,7 +10,8 @@
     "lint": "eslint src/",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "postbuild": "next-sitemap"
+    "postbuild": "next-sitemap",
+    "prepare": "husky"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.53",
@@ -40,6 +41,12 @@
     "stripe": "^17.7.0",
     "zod": "^4.3.6"
   },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "eslint --max-warnings=0",
+      "bash -c 'npx tsc --noEmit'"
+    ]
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@playwright/test": "^1.59.1",
@@ -51,6 +58,8 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "^16.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "typescript": "^5"
   }
 }
